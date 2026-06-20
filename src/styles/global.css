@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+/* Explicit dark-mode strategy: toggled via a `.dark` class on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Accent is a real Tailwind theme color (bg-accent, text-accent, ring-accent,
+   border-accent, plus opacity modifiers like bg-accent/10) so every component
+   just uses the utility — the swatch picker only ever touches the vars below. */
+@theme {
+  --color-accent: #3b82f6;
+  --color-accent-hover: #2563eb;
+}
+
+html[data-accent="blue"] {
+  --color-accent: #3b82f6;
+  --color-accent-hover: #2563eb;
+}
+html[data-accent="green"] {
+  --color-accent: #16a34a;
+  --color-accent-hover: #15803d;
+}
+html[data-accent="purple"] {
+  --color-accent: #8b5cf6;
+  --color-accent-hover: #7c3aed;
+}
+html[data-accent="orange"] {
+  --color-accent: #f97316;
+  --color-accent-hover: #ea580c;
+}
+html[data-accent="pink"] {
+  --color-accent: #ec4899;
+  --color-accent-hover: #db2777;
+}
+html[data-accent="red"] {
+  --color-accent: #ef4444;
+  --color-accent-hover: #dc2626;
+}
+
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+input,
+select,
+textarea,
+button {
+  font-family: inherit;
+}
+
+input[type="checkbox"] {
+  accent-color: var(--color-accent);
+}
+
+/* Subtle, modern scrollbars instead of the chunky OS default. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-slate-300) transparent;
+}
+.dark * {
+  scrollbar-color: var(--color-slate-700) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-slate-300);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--color-slate-700);
+  background-clip: content-box;
+}
+
+/* Colors/borders animate; layout properties never do (keeps resize/drag crisp). */
+button,
+input,
+select,
+textarea,
+a {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.resize-handle-x {
+  cursor: col-resize;
+  touch-action: none;
+}
+.resize-handle-y {
+  cursor: row-resize;
+  touch-action: none;
+}
