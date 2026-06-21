@@ -40,6 +40,40 @@ pub fn create(conn: &Connection, name: &str) -> AppResult<Workspace> {
     Ok(ws)
 }
 
+pub fn update(conn: &Connection, id: &str, name: &str) -> AppResult<Workspace> {
+    let n = conn.execute(
+        "UPDATE workspaces SET name = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, name, now_millis()],
+    )?;
+    if n == 0 {
+        return Err(AppError::NotFound(format!("workspace {id}")));
+    }
+    conn.query_row(&format!("{SELECT} WHERE id = ?1"), params![id], row_to_workspace)
+        .map_err(|_| AppError::NotFound(format!("workspace {id}")))
+}
+
+/// Delete a workspace (cascades to its collections/environments/history/tabs).
+/// Refuses to delete the last remaining workspace — the app always needs at
+/// least one — and re-activates another workspace if the active one is removed.
+pub fn delete(conn: &mut Connection, id: &str) -> AppResult<()> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM workspaces", [], |r| r.get(0))?;
+    if count <= 1 {
+        return Err(AppError::Other("cannot delete the last remaining workspace".into()));
+    }
+    let tx = conn.transaction()?;
+    let n = tx.execute("DELETE FROM workspaces WHERE id = ?1", params![id])?;
+    tx.commit()?;
+    if n == 0 {
+        return Err(AppError::NotFound(format!("workspace {id}")));
+    }
+    if active(conn)?.is_none() {
+        let first: String =
+            conn.query_row("SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1", [], |r| r.get(0))?;
+        set_active(conn, &first)?;
+    }
+    Ok(())
+}
+
 /// Mark `id` as the single active workspace.
 pub fn set_active(conn: &mut Connection, id: &str) -> AppResult<()> {
     let tx = conn.transaction()?;

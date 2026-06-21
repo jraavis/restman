@@ -1,9 +1,11 @@
-//! Left sidebar with switchable panels. Collections/History/Environments are
-//! wired in Phase 2; for now they show empty-state placeholders. Resizable
-//! via the drag handle on its trailing edge.
+//! Left sidebar with switchable panels. Resizable via the drag handle on its
+//! trailing edge.
 
 import { FolderTree, History, Variable } from "lucide-react";
 import { ResizeHandle } from "../components/ResizeHandle";
+import { CollectionsPanel } from "../features/collections/CollectionsPanel";
+import { EnvironmentsPanel } from "../features/environments/EnvironmentsPanel";
+import { HistoryPanel } from "../features/history/HistoryPanel";
 import { useUiStore, type SidePanel } from "../stores/uiStore";
 
 const PANELS: { id: SidePanel; label: string; icon: typeof FolderTree }[] = [
@@ -43,11 +45,10 @@ export function Sidebar() {
             </button>
           ))}
         </nav>
-        <div className="flex flex-1 flex-col items-center justify-center gap-1 overflow-auto p-3 text-center text-slate-400">
-          <p className="text-sm font-medium capitalize text-slate-500 dark:text-slate-400">
-            {activePanel}
-          </p>
-          <p className="text-xs">Coming in Phase 2.</p>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {activePanel === "collections" && <CollectionsPanel />}
+          {activePanel === "history" && <HistoryPanel />}
+          {activePanel === "environments" && <EnvironmentsPanel />}
         </div>
       </aside>
       <ResizeHandle

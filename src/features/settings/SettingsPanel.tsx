@@ -1,9 +1,10 @@
 //! Appearance settings popover: theme, accent color, editor font size.
 //! Anchored under the gear button in the TopBar; closes on outside click/Escape.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Minus, Monitor, Moon, Plus, Sun } from "lucide-react";
 import { useUiStore, type Accent, type Theme } from "../../stores/uiStore";
+import { useHistoryRetention, useSetHistoryRetention } from "../history/hooks";
 
 const ACCENTS: { id: Accent; label: string; swatch: string }[] = [
   { id: "blue", label: "Blue", swatch: "#3b82f6" },
@@ -32,6 +33,23 @@ export function SettingsPanel({ onClose }: Props) {
   const setAccent = useUiStore((s) => s.setAccent);
   const fontSize = useUiStore((s) => s.editorFontSize);
   const setEditorFontSize = useUiStore((s) => s.setEditorFontSize);
+
+  const { data: retention } = useHistoryRetention();
+  const setRetention = useSetHistoryRetention();
+  const [draftRetention, setDraftRetention] = useState("");
+
+  useEffect(() => {
+    if (retention != null) setDraftRetention(String(retention));
+  }, [retention]);
+
+  function commitRetention() {
+    const n = parseInt(draftRetention, 10);
+    if (Number.isFinite(n) && n > 0) {
+      if (n !== retention) setRetention.mutate(n);
+    } else if (retention != null) {
+      setDraftRetention(String(retention));
+    }
+  }
 
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
@@ -115,6 +133,29 @@ export function SettingsPanel({ onClose }: Props) {
         >
           <Plus size={13} />
         </button>
+      </div>
+
+      <p className="mt-3 px-1 text-xs font-semibold tracking-wide text-slate-400 uppercase dark:text-slate-500">
+        History
+      </p>
+      <div className="mt-1.5 flex items-center gap-2 px-1">
+        <label htmlFor="history-retention" className="text-xs text-slate-500 dark:text-slate-400">
+          Keep last
+        </label>
+        <input
+          id="history-retention"
+          type="number"
+          min={1}
+          step={50}
+          value={draftRetention}
+          onChange={(e) => setDraftRetention(e.target.value)}
+          onBlur={commitRetention}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitRetention();
+          }}
+          className="w-16 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs tabular-nums focus:outline-none focus:ring-2 focus:ring-accent/40 dark:border-slate-700 dark:bg-slate-800"
+        />
+        <span className="text-xs text-slate-500 dark:text-slate-400">requests</span>
       </div>
     </div>
   );

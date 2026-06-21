@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-fn default_true() -> bool {
+pub(crate) fn default_true() -> bool {
     true
 }
 fn default_timeout() -> u64 {
@@ -92,7 +92,7 @@ impl Default for RequestOptions {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRequest {
     pub method: String,

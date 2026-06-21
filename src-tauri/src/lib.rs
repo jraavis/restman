@@ -2,8 +2,10 @@ mod commands;
 mod engine;
 mod error;
 mod model;
+mod secrets;
 mod store;
 mod util;
+mod vars;
 
 use std::sync::Mutex;
 use store::AppState;
@@ -21,6 +23,7 @@ pub fn run() {
 
             let mut conn = store::db::open(&db_path)?;
             store::workspaces::ensure_default(&mut conn)?;
+            store::variables::migrate_plaintext_secrets_to_keychain(&conn);
             app.manage(AppState {
                 db: Mutex::new(conn),
             });
@@ -32,7 +35,56 @@ pub fn run() {
             commands::list_workspaces,
             commands::active_workspace,
             commands::create_workspace,
+            commands::update_workspace,
+            commands::delete_workspace,
             commands::set_active_workspace,
+            commands::list_collections,
+            commands::create_collection,
+            commands::update_collection,
+            commands::delete_collection,
+            commands::move_collection,
+            commands::reorder_collections,
+            commands::duplicate_collection,
+            commands::list_requests,
+            commands::get_request,
+            commands::create_request,
+            commands::update_request,
+            commands::delete_request,
+            commands::move_request,
+            commands::reorder_requests,
+            commands::duplicate_request,
+            commands::set_request_tags,
+            commands::search_requests,
+            commands::list_tags,
+            commands::create_tag,
+            commands::update_tag,
+            commands::delete_tag,
+            commands::list_environments,
+            commands::create_environment,
+            commands::update_environment,
+            commands::delete_environment,
+            commands::set_active_environment,
+            commands::active_environment,
+            commands::list_variables,
+            commands::create_variable,
+            commands::update_variable,
+            commands::delete_variable,
+            commands::get_secret_backend_status,
+            commands::list_history,
+            commands::delete_history_entry,
+            commands::clear_history,
+            commands::replay_history_entry,
+            commands::get_history_retention,
+            commands::set_history_retention,
+            commands::list_tabs,
+            commands::create_tab,
+            commands::update_tab_draft,
+            commands::set_tab_request_id,
+            commands::set_active_tab,
+            commands::reorder_tabs,
+            commands::close_tab,
+            commands::close_other_tabs,
+            commands::close_all_tabs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

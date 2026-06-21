@@ -1,19 +1,27 @@
 //! The request editor: method + URL + send, over Params/Headers/Body/Options.
 
-import { useState, type ReactNode } from "react";
-import { ChevronDown, Send } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, Save, Send } from "lucide-react";
 import { COMMON_HEADERS, type HeaderEntry } from "../../lib/http";
 import { HTTP_METHODS, isValidUrl, methodBadgeClasses, protocolOf } from "../../lib/methods";
 import { Switch } from "../../components/Switch";
+import { VariableSuggestInput } from "../../components/VariableSuggestInput";
 import { useRequestStore } from "../../stores/requestStore";
+import { useCollections } from "../collections/hooks";
+import { useActiveWorkspace } from "../workspaces/hooks";
+import { useResolvedVariableKeys } from "../environments/hooks";
 import { BodyEditor } from "./BodyEditor";
 import { KeyValueEditor, type Pair } from "./KeyValueEditor";
+import { SaveRequestDialog } from "./SaveRequestDialog";
+import { useSaveRequest } from "./useSaveRequest";
 import { useSend } from "./useSend";
 
 type Tab = "params" | "headers" | "body" | "options";
 
 export function RequestBuilder() {
   const request = useRequestStore((s) => s.request);
+  const title = useRequestStore((s) => s.title);
+  const setTitle = useRequestStore((s) => s.setTitle);
   const setMethod = useRequestStore((s) => s.setMethod);
   const setUrl = useRequestStore((s) => s.setUrl);
   const setQuery = useRequestStore((s) => s.setQuery);
@@ -21,6 +29,33 @@ export function RequestBuilder() {
   const setBody = useRequestStore((s) => s.setBody);
   const setOptions = useRequestStore((s) => s.setOptions);
   const { send, sending } = useSend();
+
+  const { data: workspace } = useActiveWorkspace();
+  const workspaceId = workspace?.id;
+  const { data: collections } = useCollections(workspaceId);
+  const { save, isLinked, saving } = useSaveRequest(workspaceId);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const collectionId = useRequestStore((s) => s.collectionId);
+  const variableKeys = useResolvedVariableKeys(workspaceId, collectionId);
+
+  // Cmd/Ctrl+S: overwrite directly if already linked, otherwise prompt for a
+  // name + collection. Mounted once; reads the latest save/isLinked through
+  // refs so the listener doesn't re-attach on every keystroke in the builder.
+  const isLinkedRef = useRef(isLinked);
+  isLinkedRef.current = isLinked;
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      if (isLinkedRef.current) void saveRef.current();
+      else setShowSaveDialog(true);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const [tab, setTab] = useState<Tab>("params");
 
@@ -61,24 +96,35 @@ export function RequestBuilder() {
           />
         </div>
 
-        <input
+        <VariableSuggestInput
           value={request.url}
-          onChange={(e) => setUrl(e.target.value)}
+          onChange={setUrl}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
               e.preventDefault();
               void send();
             }
           }}
+          variableKeys={variableKeys}
           placeholder="https://api.example.com/v1/users"
           spellCheck={false}
           className={
-            "min-w-0 flex-1 rounded-lg border bg-slate-50 px-3 py-1.5 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent/40 dark:bg-slate-800 dark:focus:bg-slate-800 " +
+            "rounded-lg border bg-slate-50 px-3 py-1.5 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent/40 dark:bg-slate-800 dark:focus:bg-slate-800 " +
             (urlOk
               ? "border-slate-200 dark:border-slate-700"
               : "border-red-400 dark:border-red-500")
           }
         />
+
+        <button
+          type="button"
+          disabled={saving}
+          title={isLinked ? "Save (Cmd+S)" : "Save as… (Cmd+S)"}
+          onClick={() => (isLinked ? void save() : setShowSaveDialog(true))}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+        >
+          <Save size={14} />
+        </button>
 
         <button
           type="button"
@@ -128,6 +174,7 @@ export function RequestBuilder() {
             rows={request.query}
             onChange={setQuery}
             keyPlaceholder="Parameter"
+            variableKeys={variableKeys}
           />
         )}
         {tab === "headers" && (
@@ -136,9 +183,10 @@ export function RequestBuilder() {
             onChange={setHeaderRows}
             keyPlaceholder="Header"
             keySuggestions={COMMON_HEADERS}
+            variableKeys={variableKeys}
           />
         )}
-        {tab === "body" && <BodyEditor body={request.body} onChange={setBody} />}
+        {tab === "body" && <BodyEditor body={request.body} onChange={setBody} variableKeys={variableKeys} />}
         {tab === "options" && (
           <div className="flex flex-col gap-4 text-sm">
             <label className="flex items-center gap-2">
@@ -165,6 +213,19 @@ export function RequestBuilder() {
           </div>
         )}
       </div>
+
+      {showSaveDialog && (
+        <SaveRequestDialog
+          defaultName={title}
+          collections={collections ?? []}
+          saving={saving}
+          onClose={() => setShowSaveDialog(false)}
+          onSave={(name, collectionId) => {
+            setTitle(name);
+            void save(collectionId, name).then(() => setShowSaveDialog(false));
+          }}
+        />
+      )}
     </section>
   );
 }

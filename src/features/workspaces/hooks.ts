@@ -36,3 +36,25 @@ export function useSetActiveWorkspace() {
     },
   });
 }
+
+export function useUpdateWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => ipc.updateWorkspace(id, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      qc.invalidateQueries({ queryKey: workspaceKeys.active });
+    },
+  });
+}
+
+export function useDeleteWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ipc.deleteWorkspace(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      qc.invalidateQueries({ queryKey: workspaceKeys.active });
+    },
+  });
+}

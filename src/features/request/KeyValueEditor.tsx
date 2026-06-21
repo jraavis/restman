@@ -3,6 +3,7 @@
 
 import { useId } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { VariableSuggestInput } from "../../components/VariableSuggestInput";
 
 export interface Pair {
   key: string;
@@ -17,6 +18,8 @@ interface Props {
   valuePlaceholder?: string;
   /** Optional autocomplete suggestions for the key field. */
   keySuggestions?: string[];
+  /** Known `{{var}}` names offered while typing in the value field. */
+  variableKeys?: string[];
 }
 
 export function KeyValueEditor({
@@ -25,6 +28,7 @@ export function KeyValueEditor({
   keyPlaceholder = "Key",
   valuePlaceholder = "Value",
   keySuggestions,
+  variableKeys,
 }: Props) {
   const listId = useId();
 
@@ -67,11 +71,12 @@ export function KeyValueEditor({
             placeholder={keyPlaceholder}
             className={cell}
           />
-          <input
+          <VariableSuggestInput
             value={row.value}
-            onChange={(e) => update(i, { value: e.target.value })}
+            onChange={(value) => update(i, { value })}
             placeholder={valuePlaceholder}
             className={cell}
+            variableKeys={variableKeys}
           />
           <button
             type="button"

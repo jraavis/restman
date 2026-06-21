@@ -1,7 +1,14 @@
 //! Persistence layer: SQLite connection, schema migrations, and entity repos.
 
+pub mod collections;
 pub mod db;
+pub mod environments;
+pub mod history;
 pub mod migrations;
+pub mod requests;
+pub mod tabs;
+pub mod tags;
+pub mod variables;
 pub mod workspaces;
 
 use rusqlite::Connection;

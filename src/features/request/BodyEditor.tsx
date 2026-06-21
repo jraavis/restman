@@ -2,6 +2,7 @@
 
 import { Plus, Trash2 } from "lucide-react";
 import { LazyCodeEditor } from "../../components/LazyCodeEditor";
+import { VariableSuggestInput } from "../../components/VariableSuggestInput";
 import {
   emptyBody,
   type BodyMode,
@@ -26,9 +27,10 @@ const RAW_LANGUAGES = ["text", "json", "xml", "html", "javascript", "python"];
 interface Props {
   body: RequestBody;
   onChange: (body: RequestBody) => void;
+  variableKeys?: string[];
 }
 
-export function BodyEditor({ body, onChange }: Props) {
+export function BodyEditor({ body, onChange, variableKeys }: Props) {
   return (
     <div className="flex h-full flex-col">
       <div className="mb-3 flex w-fit flex-wrap gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
@@ -48,12 +50,12 @@ export function BodyEditor({ body, onChange }: Props) {
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1">{renderEditor(body, onChange)}</div>
+      <div className="min-h-0 flex-1">{renderEditor(body, onChange, variableKeys)}</div>
     </div>
   );
 }
 
-function renderEditor(body: RequestBody, onChange: (b: RequestBody) => void) {
+function renderEditor(body: RequestBody, onChange: (b: RequestBody) => void, variableKeys?: string[]) {
   switch (body.mode) {
     case "none":
       return <p className="p-2 text-xs text-slate-400">This request has no body.</p>;
@@ -65,6 +67,7 @@ function renderEditor(body: RequestBody, onChange: (b: RequestBody) => void) {
           height="220px"
           value={body.data}
           onChange={(v) => onChange({ mode: "json", data: v ?? "" })}
+          variableKeys={variableKeys}
         />
       );
 
@@ -91,6 +94,7 @@ function renderEditor(body: RequestBody, onChange: (b: RequestBody) => void) {
             onChange={(v) =>
               onChange({ mode: "raw", data: { ...body.data, content: v ?? "" } })
             }
+            variableKeys={variableKeys}
           />
         </div>
       );
@@ -100,11 +104,18 @@ function renderEditor(body: RequestBody, onChange: (b: RequestBody) => void) {
         <KeyValueEditor
           rows={body.data as Pair[]}
           onChange={(rows) => onChange({ mode: "urlEncoded", data: rows as KeyValue[] })}
+          variableKeys={variableKeys}
         />
       );
 
     case "formData":
-      return <FormDataEditor fields={body.data} onChange={(f) => onChange({ mode: "formData", data: f })} />;
+      return (
+        <FormDataEditor
+          fields={body.data}
+          onChange={(f) => onChange({ mode: "formData", data: f })}
+          variableKeys={variableKeys}
+        />
+      );
 
     case "binary":
       return (
@@ -133,6 +144,7 @@ function renderEditor(body: RequestBody, onChange: (b: RequestBody) => void) {
             onChange={(v) =>
               onChange({ mode: "graphql", data: { ...body.data, query: v ?? "" } })
             }
+            variableKeys={variableKeys}
           />
           <span className="text-xs text-slate-500 dark:text-slate-400">Variables (JSON)</span>
           <LazyCodeEditor
@@ -142,6 +154,7 @@ function renderEditor(body: RequestBody, onChange: (b: RequestBody) => void) {
             onChange={(v) =>
               onChange({ mode: "graphql", data: { ...body.data, variables: v ?? "" } })
             }
+            variableKeys={variableKeys}
           />
         </div>
       );
@@ -156,9 +169,11 @@ function monacoLang(lang?: string | null): string {
 function FormDataEditor({
   fields,
   onChange,
+  variableKeys,
 }: {
   fields: FormField[];
   onChange: (fields: FormField[]) => void;
+  variableKeys?: string[];
 }) {
   const update = (i: number, patch: Partial<FormField>) =>
     onChange(fields.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
@@ -191,12 +206,22 @@ function FormDataEditor({
             placeholder="Field name"
             className={cell}
           />
-          <input
-            value={f.value}
-            onChange={(e) => update(i, { value: e.target.value })}
-            placeholder={f.isFile ? "/path/to/file" : "Value"}
-            className={cell}
-          />
+          {f.isFile ? (
+            <input
+              value={f.value}
+              onChange={(e) => update(i, { value: e.target.value })}
+              placeholder="/path/to/file"
+              className={cell}
+            />
+          ) : (
+            <VariableSuggestInput
+              value={f.value}
+              onChange={(value) => update(i, { value })}
+              placeholder="Value"
+              className={cell}
+              variableKeys={variableKeys}
+            />
+          )}
           <button
             type="button"
             onClick={() => update(i, { isFile: !f.isFile })}

@@ -14,6 +14,9 @@ pub enum AppError {
     #[error("network error: {0}")]
     Http(#[from] reqwest::Error),
 
+    #[error("serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("not found: {0}")]
     NotFound(String),
 

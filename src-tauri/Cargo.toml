@@ -28,4 +28,5 @@ uuid = { version = "1.23.3", features = ["v4"] }
 reqwest = { version = "0.13.4", features = ["json", "gzip", "brotli", "deflate", "zstd", "multipart", "stream", "cookies", "system-proxy", "form"] }
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "time"] }
 base64 = "0.22.1"
+keyring = { version = "4.1.2", default-features = false, features = ["v1", "apple-native-keyring-store", "windows-native-keyring-store", "zbus-secret-service-keyring-store"] }
 
