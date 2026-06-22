@@ -32,7 +32,17 @@ pub fn resolve(conn: &Connection, workspace_id: &str, collection_id: Option<&str
         merge(&mut resolved, variables::list(conn, &VarScope::Collection(cid.to_string()))?);
     }
     if let Some(env) = environments::active_for_workspace(conn, workspace_id)? {
-        merge(&mut resolved, variables::list(conn, &VarScope::Environment(env.id))?);
+        // A collection-scoped env only applies when sending from that exact
+        // collection — otherwise an active env scoped to collection A would
+        // leak into sends from collection B (or no collection at all). A
+        // workspace-global env (collection_id None) always applies.
+        let applies = match env.collection_id.as_deref() {
+            None => true,
+            Some(env_cid) => collection_id == Some(env_cid),
+        };
+        if applies {
+            merge(&mut resolved, variables::list(conn, &VarScope::Environment(env.id))?);
+        }
     }
     Ok(resolved)
 }
@@ -51,7 +61,7 @@ fn merge(resolved: &mut Resolved, list: Vec<Variable>) {
             // secret can't block every send that doesn't even use it; the
             // `get_secret_backend_status` command covers the up-front
             // "keychain unavailable" warning instead.
-            let secret = crate::secrets::get(&v.id).ok().flatten().unwrap_or_default();
+            let secret = crate::secrets::get(&variables::keychain_key(&v.id)).ok().flatten().unwrap_or_default();
             // Guard empty values: an empty string as a "secret" would
             // otherwise become a redact needle that matches (and mangles)
             // everything.
@@ -350,5 +360,65 @@ mod tests {
         };
         let redacted = redact_request(&req, &HashSet::new());
         assert_eq!(redacted.url, req.url);
+    }
+
+    #[test]
+    fn active_collection_scoped_env_does_not_leak_to_other_collections() {
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
+        let collection_a = crate::store::collections::create(&conn, &ws.id, None, "A", None).unwrap();
+        let collection_b = crate::store::collections::create(&conn, &ws.id, None, "B", None).unwrap();
+
+        let env = environments::create(&conn, &ws.id, Some(&collection_a.id), "A-only", None).unwrap();
+        variables::create(
+            &conn,
+            &VarScope::Environment(env.id.clone()),
+            &crate::model::VariableInput {
+                key: "scoped".into(),
+                value: "a-value".into(),
+                var_type: crate::model::VarType::String,
+                is_secret: false,
+                enabled: true,
+            },
+        )
+        .unwrap();
+        environments::set_active(&mut conn, &ws.id, Some(&env.id)).unwrap();
+
+        let in_a = resolve(&conn, &ws.id, Some(&collection_a.id)).unwrap();
+        assert_eq!(in_a.values.get("scoped").unwrap(), "a-value");
+
+        let in_b = resolve(&conn, &ws.id, Some(&collection_b.id)).unwrap();
+        assert!(!in_b.values.contains_key("scoped"));
+
+        let unscoped = resolve(&conn, &ws.id, None).unwrap();
+        assert!(!unscoped.values.contains_key("scoped"));
+    }
+
+    #[test]
+    fn workspace_global_active_env_applies_regardless_of_collection() {
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
+        let collection = crate::store::collections::create(&conn, &ws.id, None, "C", None).unwrap();
+
+        let env = environments::create(&conn, &ws.id, None, "Global env", None).unwrap();
+        variables::create(
+            &conn,
+            &VarScope::Environment(env.id.clone()),
+            &crate::model::VariableInput {
+                key: "g".into(),
+                value: "g-value".into(),
+                var_type: crate::model::VarType::String,
+                is_secret: false,
+                enabled: true,
+            },
+        )
+        .unwrap();
+        environments::set_active(&mut conn, &ws.id, Some(&env.id)).unwrap();
+
+        let in_collection = resolve(&conn, &ws.id, Some(&collection.id)).unwrap();
+        assert_eq!(in_collection.values.get("g").unwrap(), "g-value");
+
+        let no_collection = resolve(&conn, &ws.id, None).unwrap();
+        assert_eq!(no_collection.values.get("g").unwrap(), "g-value");
     }
 }

@@ -92,7 +92,9 @@ pub fn list(conn: &Connection, workspace_id: &str, filter: &HistoryFilter) -> Ap
     if filter.date_max.is_some() {
         sql.push_str(" AND created_at <= ?7");
     }
-    sql.push_str(" ORDER BY created_at DESC LIMIT ?8");
+    // `rowid` tiebreaker: millisecond-resolution `created_at` ties on rapid
+    // successive inserts otherwise leave order unspecified.
+    sql.push_str(" ORDER BY created_at DESC, rowid DESC LIMIT ?8");
 
     let mut stmt = conn.prepare(&sql)?;
     let text_pattern = filter.text.as_ref().map(|t| format!("%{t}%"));

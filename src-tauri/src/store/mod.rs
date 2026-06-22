@@ -11,11 +11,12 @@ pub mod tags;
 pub mod variables;
 pub mod workspaces;
 
+use reqwest_cookie_store::CookieStoreMutex;
 use rusqlite::Connection;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-/// Managed Tauri state holding the single SQLite connection.
-/// A `Mutex` serializes access — adequate for a single-user desktop app.
+/// Managed Tauri state holding the single SQLite connection and the
+/// shared cookie jar for cookie-based session auth.
 ///
 /// IMPORTANT (async commands): the std `MutexGuard` is `!Send`. In an `async`
 /// command, take the lock, do the DB work, and drop the guard *before* any
@@ -24,4 +25,7 @@ use std::sync::Mutex;
 /// rather than switching to an async mutex.
 pub struct AppState {
     pub db: Mutex<Connection>,
+    /// Shared RFC 6265 cookie jar. Requests with `send_cookies: true` share
+    /// this store — cookies set by one request are replayed on subsequent ones.
+    pub cookie_jar: Arc<CookieStoreMutex>,
 }

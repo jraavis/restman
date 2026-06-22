@@ -12,11 +12,12 @@ import { useActiveWorkspace } from "../workspaces/hooks";
 import { useResolvedVariableKeys } from "../environments/hooks";
 import { BodyEditor } from "./BodyEditor";
 import { KeyValueEditor, type Pair } from "./KeyValueEditor";
+import { RequestAuthTab } from "./RequestAuthTab";
 import { SaveRequestDialog } from "./SaveRequestDialog";
 import { useSaveRequest } from "./useSaveRequest";
 import { useSend } from "./useSend";
 
-type Tab = "params" | "headers" | "body" | "options";
+type Tab = "params" | "headers" | "body" | "auth" | "options";
 
 export function RequestBuilder() {
   const request = useRequestStore((s) => s.request);
@@ -28,6 +29,8 @@ export function RequestBuilder() {
   const setHeaders = useRequestStore((s) => s.setHeaders);
   const setBody = useRequestStore((s) => s.setBody);
   const setOptions = useRequestStore((s) => s.setOptions);
+  const auth = useRequestStore((s) => s.auth);
+  const setAuth = useRequestStore((s) => s.setAuth);
   const { send, sending } = useSend();
 
   const { data: workspace } = useActiveWorkspace();
@@ -36,6 +39,7 @@ export function RequestBuilder() {
   const { save, isLinked, saving } = useSaveRequest(workspaceId);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const collectionId = useRequestStore((s) => s.collectionId);
+  const requestId = useRequestStore((s) => s.requestId);
   const variableKeys = useResolvedVariableKeys(workspaceId, collectionId);
 
   // Cmd/Ctrl+S: overwrite directly if already linked, otherwise prompt for a
@@ -145,7 +149,7 @@ export function RequestBuilder() {
       )}
 
       <nav className="flex gap-1 border-t border-b border-slate-100 px-3 dark:border-slate-800">
-        {(["params", "headers", "body", "options"] as Tab[]).map((t) => (
+        {(["params", "headers", "body", "auth", "options"] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
@@ -187,6 +191,9 @@ export function RequestBuilder() {
           />
         )}
         {tab === "body" && <BodyEditor body={request.body} onChange={setBody} variableKeys={variableKeys} />}
+        {tab === "auth" && (
+          <RequestAuthTab auth={auth} onChange={setAuth} collectionId={collectionId} requestId={requestId} />
+        )}
         {tab === "options" && (
           <div className="flex flex-col gap-4 text-sm">
             <label className="flex items-center gap-2">

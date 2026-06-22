@@ -28,7 +28,7 @@ pub fn update_variable(state: State<AppState>, id: String, mut input: VariableIn
     // The real value lives in the keychain, not the (always-empty) DB column,
     // so it has to be recovered from there, not from `variables::get`.
     if input.is_secret && input.value == SECRET_MASK {
-        input.value = secrets::get(&id)?.unwrap_or_default();
+        input.value = secrets::get(&format!("var:{id}"))?.unwrap_or_default();
     }
     Ok(variables::update(&conn, &id, &input)?.mask_secret())
 }

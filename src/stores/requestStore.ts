@@ -13,6 +13,7 @@ import {
   type RequestBody,
   type RequestOptions,
 } from "../lib/http";
+import { defaultRequestAuth, type RequestAuth } from "../lib/types";
 
 interface RequestState {
   /** Tab this draft belongs to. Null only for the brief window before the first tab loads. */
@@ -23,6 +24,12 @@ interface RequestState {
   collectionId: string | null;
   title: string;
   request: HttpRequest;
+  /** This draft's own auth, separate from `request` — like `title`, it's
+   * `SavedRequest`/`SavedRequestInput` state, not part of the `HttpRequest`
+   * wire shape (which only ever carries the already-resolved, never-Inherit
+   * config, and is never round-tripped back from the backend — see
+   * `HttpRequest.auth`'s doc comment). */
+  auth: RequestAuth;
   response: HttpResponse | null;
   sending: boolean;
   error: string | null;
@@ -34,6 +41,7 @@ interface RequestState {
   setBody: (body: RequestBody) => void;
   setOptions: (options: Partial<RequestOptions>) => void;
   setTitle: (title: string) => void;
+  setAuth: (auth: RequestAuth) => void;
 
   /** Replace the whole draft wholesale — used on tab switch/restore, never on a single field edit. */
   loadTab: (args: {
@@ -42,6 +50,7 @@ interface RequestState {
     collectionId: string | null;
     title: string;
     draft: HttpRequest;
+    auth: RequestAuth;
   }) => void;
   /** Record that the current draft now has a saved-request home (after a first Save). */
   setRequestLink: (requestId: string, collectionId: string) => void;
@@ -59,6 +68,7 @@ export const useRequestStore = create<RequestState>((set) => ({
   collectionId: null,
   title: "Untitled",
   request: defaultRequest(),
+  auth: defaultRequestAuth(),
   response: null,
   sending: false,
   error: null,
@@ -71,14 +81,16 @@ export const useRequestStore = create<RequestState>((set) => ({
   setOptions: (options) =>
     set((s) => ({ request: { ...s.request, options: { ...s.request.options, ...options } } })),
   setTitle: (title) => set({ title }),
+  setAuth: (auth) => set({ auth }),
 
-  loadTab: ({ tabId, requestId, collectionId, title, draft }) =>
+  loadTab: ({ tabId, requestId, collectionId, title, draft, auth }) =>
     set({
       activeTabId: tabId,
       requestId,
       collectionId,
       title,
       request: draft,
+      auth,
       response: null,
       error: null,
       sending: false,

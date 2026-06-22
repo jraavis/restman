@@ -1,5 +1,5 @@
 use crate::error::AppResult;
-use crate::model::Collection;
+use crate::model::{AuthConfig, Collection};
 use crate::store::{collections, AppState};
 use tauri::State;
 
@@ -30,6 +30,12 @@ pub fn update_collection(
 ) -> AppResult<Collection> {
     let conn = state.db.lock().unwrap();
     collections::update(&conn, &id, &name, description.as_deref())
+}
+
+#[tauri::command]
+pub fn update_collection_auth(state: State<AppState>, id: String, auth: AuthConfig) -> AppResult<Collection> {
+    let conn = state.db.lock().unwrap();
+    collections::update_auth(&conn, &id, auth)
 }
 
 #[tauri::command]

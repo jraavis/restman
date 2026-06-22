@@ -1,6 +1,7 @@
 //! Shared data structures serialized across the IPC boundary.
 //! Field names are camelCased to match idiomatic TypeScript on the frontend.
 
+pub mod auth;
 pub mod collection;
 pub mod environment;
 pub mod history;
@@ -12,6 +13,7 @@ pub mod variable;
 
 use serde::{Deserialize, Serialize};
 
+pub use auth::{ApiKeyLocation, AuthConfig, AwsSigV4Config, OAuth2Config, OAuth2GrantType, PkceMethod, RequestAuth};
 pub use collection::Collection;
 pub use environment::Environment;
 pub use history::{HistoryEntry, HistoryFilter};

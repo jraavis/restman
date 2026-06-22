@@ -147,6 +147,32 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_tabs_workspace ON tabs(workspace_id);
     "#,
+    // v3 — auth. Static config is embedded JSON on the owning row, same
+    // convention as requests.headers_json/body_json/etc; collections store a
+    // plain AuthConfig (default none), requests store a RequestAuth
+    // (inherit | own, default inherit). Mutable OAuth token *state* lives
+    // separately so a background refresh never has to rewrite the user's
+    // saved auth config — at most one token row per owner (see the auth
+    // module, which enforces this with delete-then-insert on every write).
+    r#"
+    ALTER TABLE collections ADD COLUMN auth_json TEXT NOT NULL DEFAULT '{"type":"none"}';
+    ALTER TABLE requests ADD COLUMN auth_json TEXT NOT NULL DEFAULT '{"mode":"inherit"}';
+
+    CREATE TABLE oauth_tokens (
+        id                TEXT PRIMARY KEY,
+        collection_id     TEXT REFERENCES collections(id) ON DELETE CASCADE,
+        request_id        TEXT REFERENCES requests(id) ON DELETE CASCADE,
+        token_type        TEXT NOT NULL DEFAULT 'Bearer',
+        scope             TEXT,
+        expires_at        INTEGER,
+        has_refresh_token INTEGER NOT NULL DEFAULT 0,
+        obtained_at       INTEGER NOT NULL,
+        updated_at        INTEGER NOT NULL,
+        CHECK ((collection_id IS NOT NULL) + (request_id IS NOT NULL) = 1)
+    );
+    CREATE INDEX idx_oauth_tokens_collection ON oauth_tokens(collection_id);
+    CREATE INDEX idx_oauth_tokens_request ON oauth_tokens(request_id);
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

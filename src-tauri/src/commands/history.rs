@@ -2,6 +2,7 @@ use crate::error::AppResult;
 use crate::model::http::HttpResponse;
 use crate::model::{HistoryEntry, HistoryFilter};
 use crate::store::{history, AppState};
+use std::sync::Arc;
 use tauri::State;
 
 #[tauri::command]
@@ -42,7 +43,7 @@ pub async fn replay_history_entry(state: State<'_, AppState>, id: String) -> App
         let conn = state.db.lock().unwrap();
         history::get(&conn, &id)?
     };
-    let result = crate::engine::http::send(entry.request.clone()).await;
+    let result = crate::engine::http::send(entry.request.clone(), Some(Arc::clone(&state.cookie_jar))).await;
     {
         let conn = state.db.lock().unwrap();
         match &result {

@@ -4,7 +4,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultRequest } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
-import type { SavedRequest } from "../../lib/types";
+import { defaultRequestAuth, type SavedRequest } from "../../lib/types";
 import { useRequestStore } from "../../stores/requestStore";
 import { useSaveRequest } from "./useSaveRequest";
 
@@ -27,6 +27,7 @@ function makeSavedRequest(overrides: Partial<SavedRequest> = {}): SavedRequest {
     query: [],
     body: { mode: "none" },
     options: defaultRequest().options,
+    auth: defaultRequestAuth(),
     tags: [],
     sortOrder: 0,
     createdAt: 0,
@@ -53,6 +54,7 @@ describe("useSaveRequest", () => {
       collectionId: null,
       title: "Old title",
       request: { ...defaultRequest(), url: "https://edited.test" },
+      auth: defaultRequestAuth(),
       response: null,
       sending: false,
       error: null,

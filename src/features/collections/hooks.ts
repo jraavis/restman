@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc";
-import type { SavedRequestInput } from "../../lib/types";
+import type { AuthConfig, SavedRequestInput } from "../../lib/types";
 
 export const collectionKeys = {
   all: (workspaceId: string) => ["collections", workspaceId] as const,
@@ -45,6 +45,16 @@ export function useUpdateCollection(workspaceId: string | undefined) {
   return useMutation({
     mutationFn: ({ id, name, description }: { id: string; name: string; description?: string | null }) =>
       ipc.updateCollection(id, name, description),
+    onSuccess: () => {
+      if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+    },
+  });
+}
+
+export function useUpdateCollectionAuth(workspaceId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, auth }: { id: string; auth: AuthConfig }) => ipc.updateCollectionAuth(id, auth),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
     },
@@ -233,6 +243,9 @@ export function useSearchRequests(workspaceId: string | undefined, query: string
   return useQuery({
     queryKey: searchKeys.query(workspaceId ?? "", query, method),
     queryFn: () => ipc.searchRequests(workspaceId as string, query, method),
-    enabled: !!workspaceId && query.trim().length > 0,
+    // Blank query + no method is still a valid call (e.g. tag-only
+    // filtering) — the caller (SearchResults) only mounts once there's a
+    // query/method/tag reason to search, so no extra gate is needed here.
+    enabled: !!workspaceId,
   });
 }

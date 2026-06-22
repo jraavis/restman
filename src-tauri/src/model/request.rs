@@ -1,5 +1,6 @@
 //! A saved request: a named, persisted `HttpRequest` living in a collection.
 
+use super::auth::RequestAuth;
 use super::http::{HeaderEntry, KeyValue, RequestBody, RequestOptions};
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +16,8 @@ pub struct SavedRequest {
     pub query: Vec<KeyValue>,
     pub body: RequestBody,
     pub options: RequestOptions,
+    #[serde(default)]
+    pub auth: RequestAuth,
     pub tags: Vec<super::tag::Tag>,
     pub sort_order: i64,
     pub created_at: i64,
@@ -37,4 +40,6 @@ pub struct SavedRequestInput {
     pub body: RequestBody,
     #[serde(default)]
     pub options: RequestOptions,
+    #[serde(default)]
+    pub auth: RequestAuth,
 }

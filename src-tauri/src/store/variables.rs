@@ -40,6 +40,13 @@ fn row_to_variable(r: &rusqlite::Row) -> rusqlite::Result<Variable> {
     })
 }
 
+/// This module's keychain namespace — see `crate::secrets`. `pub(crate)` so
+/// `crate::vars::merge` can read the same key a secret variable was written
+/// under, instead of re-deriving (and risking drifting from) the convention.
+pub(crate) fn keychain_key(id: &str) -> String {
+    format!("var:{id}")
+}
+
 fn scope_columns(scope: &VarScope) -> (Option<&str>, Option<&str>, Option<&str>) {
     match scope {
         VarScope::Global => (None, None, None),
@@ -67,7 +74,7 @@ pub fn create(conn: &Connection, scope: &VarScope, input: &VariableInput) -> App
     // Linux) aborts before any row exists, rather than leaving a half-saved
     // variable with no recoverable value anywhere.
     let stored_value = if input.is_secret {
-        secrets::set(&id, &input.value)?;
+        secrets::set(&keychain_key(&id), &input.value)?;
         String::new()
     } else {
         input.value.clone()
@@ -104,12 +111,12 @@ pub fn get(conn: &Connection, id: &str) -> AppResult<Variable> {
 
 pub fn update(conn: &Connection, id: &str, input: &VariableInput) -> AppResult<Variable> {
     let stored_value = if input.is_secret {
-        secrets::set(id, &input.value)?;
+        secrets::set(&keychain_key(id), &input.value)?;
         String::new()
     } else {
         // Not (or no longer) a secret — drop any stale keychain entry from
         // a prior secret state rather than leaving an orphaned credential.
-        let _ = secrets::delete(id);
+        let _ = secrets::delete(&keychain_key(id));
         input.value.clone()
     };
     let n = conn.execute(
@@ -135,7 +142,7 @@ pub fn delete(conn: &Connection, id: &str) -> AppResult<()> {
     if n == 0 {
         return Err(AppError::NotFound(format!("variable {id}")));
     }
-    let _ = secrets::delete(id);
+    let _ = secrets::delete(&keychain_key(id));
     Ok(())
 }
 
@@ -155,7 +162,7 @@ pub fn migrate_plaintext_secrets_to_keychain(conn: &Connection) {
     })();
     let Ok(rows) = rows else { return };
     for (id, value) in rows {
-        if secrets::set(&id, &value).is_ok() {
+        if secrets::set(&keychain_key(&id), &value).is_ok() {
             let _ = conn.execute("UPDATE variables SET value = '' WHERE id = ?1", params![id]);
         }
     }
@@ -182,7 +189,7 @@ mod tests {
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
         let v = create(&conn, &VarScope::Workspace(ws.id.clone()), &input("token", "tok_abc123", true)).unwrap();
         assert_eq!(v.value, "");
-        assert_eq!(secrets::get(&v.id).unwrap().unwrap(), "tok_abc123");
+        assert_eq!(secrets::get(&keychain_key(&v.id)).unwrap().unwrap(), "tok_abc123");
     }
 
     #[test]
@@ -192,7 +199,7 @@ mod tests {
         let v = create(&conn, &VarScope::Workspace(ws.id.clone()), &input("token", "tok_abc123", true)).unwrap();
         let updated = update(&conn, &v.id, &input("token_renamed", "tok_abc123", true)).unwrap();
         assert_eq!(updated.key, "token_renamed");
-        assert_eq!(secrets::get(&v.id).unwrap().unwrap(), "tok_abc123");
+        assert_eq!(secrets::get(&keychain_key(&v.id)).unwrap().unwrap(), "tok_abc123");
     }
 
     #[test]
@@ -202,7 +209,7 @@ mod tests {
         let v = create(&conn, &VarScope::Workspace(ws.id.clone()), &input("token", "tok_abc123", true)).unwrap();
         let updated = update(&conn, &v.id, &input("token", "plain_now", false)).unwrap();
         assert_eq!(updated.value, "plain_now");
-        assert_eq!(secrets::get(&v.id).unwrap(), None);
+        assert_eq!(secrets::get(&keychain_key(&v.id)).unwrap(), None);
     }
 
     #[test]
@@ -211,7 +218,7 @@ mod tests {
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
         let v = create(&conn, &VarScope::Workspace(ws.id.clone()), &input("token", "tok_abc123", true)).unwrap();
         delete(&conn, &v.id).unwrap();
-        assert_eq!(secrets::get(&v.id).unwrap(), None);
+        assert_eq!(secrets::get(&keychain_key(&v.id)).unwrap(), None);
     }
 
     #[test]
@@ -233,6 +240,6 @@ mod tests {
 
         let row = get(&conn, &id).unwrap();
         assert_eq!(row.value, "");
-        assert_eq!(secrets::get(&id).unwrap().unwrap(), "still_plaintext");
+        assert_eq!(secrets::get(&keychain_key(&id)).unwrap().unwrap(), "still_plaintext");
     }
 }

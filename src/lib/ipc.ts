@@ -4,10 +4,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { HttpRequest, HttpResponse } from "./http";
 import type {
+  AuthConfig,
   Collection,
   Environment,
   HistoryEntry,
   HistoryFilter,
+  OAuth2Status,
   SavedRequest,
   SavedRequestInput,
   SearchHit,
@@ -52,6 +54,7 @@ export const ipc = {
     invoke<Collection>("create_collection", { workspaceId, parentId, name, description: description ?? null }),
   updateCollection: (id: string, name: string, description?: string | null) =>
     invoke<Collection>("update_collection", { id, name, description: description ?? null }),
+  updateCollectionAuth: (id: string, auth: AuthConfig) => invoke<Collection>("update_collection_auth", { id, auth }),
   deleteCollection: (id: string) => invoke<void>("delete_collection", { id }),
   moveCollection: (id: string, newParentId: string | null) =>
     invoke<Collection>("move_collection", { id, newParentId }),
@@ -74,6 +77,13 @@ export const ipc = {
     invoke<void>("set_request_tags", { requestId, tagIds }),
   searchRequests: (workspaceId: string, query: string, method?: string | null) =>
     invoke<SearchHit[]>("search_requests", { workspaceId, query, method: method ?? null }),
+
+  // OAuth2 — both resolve the same collection/request inheritance chain as
+  // `sendRequest`'s auth resolution; pass whichever id(s) are in scope.
+  startOAuth2Authorization: (collectionId?: string | null, requestId?: string | null) =>
+    invoke<OAuth2Status>("start_oauth2_authorization", { collectionId: collectionId ?? null, requestId: requestId ?? null }),
+  getOAuth2Status: (collectionId?: string | null, requestId?: string | null) =>
+    invoke<OAuth2Status | null>("get_oauth2_status", { collectionId: collectionId ?? null, requestId: requestId ?? null }),
 
   // Tags
   listTags: (workspaceId: string) => invoke<Tag[]>("list_tags", { workspaceId }),

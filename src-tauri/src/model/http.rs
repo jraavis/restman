@@ -1,5 +1,6 @@
 //! HTTP request/response types crossing the IPC boundary.
 
+use super::auth::AuthConfig;
 use serde::{Deserialize, Serialize};
 
 pub(crate) fn default_true() -> bool {
@@ -79,6 +80,10 @@ pub struct RequestOptions {
     pub verify_ssl: bool,
     #[serde(default = "default_max_redirects")]
     pub max_redirects: usize,
+    /// When true, the engine uses a shared cookie jar: Set-Cookie responses
+    /// are stored and Cookie headers are replayed on subsequent sends.
+    #[serde(default)]
+    pub send_cookies: bool,
 }
 
 impl Default for RequestOptions {
@@ -88,6 +93,7 @@ impl Default for RequestOptions {
             follow_redirects: true,
             verify_ssl: true,
             max_redirects: default_max_redirects(),
+            send_cookies: false,
         }
     }
 }
@@ -105,6 +111,11 @@ pub struct HttpRequest {
     pub body: RequestBody,
     #[serde(default)]
     pub options: RequestOptions,
+    /// Already resolved — no `Inherit` at this level. Set by
+    /// `crate::auth::resolve` + `hydrate` right before the request is sent,
+    /// never read back out over IPC.
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 /// Per-phase timing. Fields are optional: the current engine fills

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { defaultRequest } from "../lib/http";
+import { defaultRequestAuth } from "../lib/types";
 import { useRequestStore } from "./requestStore";
 
 describe("requestStore", () => {
@@ -10,6 +11,7 @@ describe("requestStore", () => {
       collectionId: null,
       title: "Untitled",
       request: defaultRequest(),
+      auth: defaultRequestAuth(),
       response: null,
       sending: false,
       error: null,
@@ -49,6 +51,7 @@ describe("requestStore", () => {
       collectionId: "col-1",
       title: "Loaded",
       draft,
+      auth: { mode: "own", type: "bearer", token: "tok" },
     });
     const s = useRequestStore.getState();
     expect(s.activeTabId).toBe("tab-1");
@@ -56,7 +59,13 @@ describe("requestStore", () => {
     expect(s.collectionId).toBe("col-1");
     expect(s.title).toBe("Loaded");
     expect(s.request.url).toBe("https://loaded.test");
+    expect(s.auth).toEqual({ mode: "own", type: "bearer", token: "tok" });
     expect(s.error).toBeNull();
+  });
+
+  it("setAuth replaces just the auth config", () => {
+    useRequestStore.getState().setAuth({ mode: "own", type: "basic", username: "u", password: "p" });
+    expect(useRequestStore.getState().auth).toEqual({ mode: "own", type: "basic", username: "u", password: "p" });
   });
 
   it("setRequestLink records a saved-request home without touching the draft", () => {

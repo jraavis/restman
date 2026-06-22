@@ -116,6 +116,7 @@ export function RequestList({
                   query: request.query,
                   body: request.body,
                   options: request.options,
+                  auth: request.auth,
                 },
               })
             }

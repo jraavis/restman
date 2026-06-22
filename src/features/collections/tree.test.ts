@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Collection, SavedRequest } from "../../lib/types";
+import { defaultRequestAuth, type Collection, type SavedRequest } from "../../lib/types";
 import { childrenOf, isDescendant, sortRequests } from "./tree";
 
 function makeCollection(overrides: Partial<Collection> = {}): Collection {
@@ -9,6 +9,7 @@ function makeCollection(overrides: Partial<Collection> = {}): Collection {
     parentId: null,
     name: "Untitled",
     description: null,
+    auth: { type: "none" },
     sortOrder: 0,
     createdAt: 0,
     updatedAt: 0,
@@ -27,6 +28,7 @@ function makeRequest(overrides: Partial<SavedRequest> = {}): SavedRequest {
     query: [],
     body: { mode: "none" } as SavedRequest["body"],
     options: {} as SavedRequest["options"],
+    auth: defaultRequestAuth(),
     tags: [],
     sortOrder: 0,
     createdAt: 0,

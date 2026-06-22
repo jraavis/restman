@@ -1,13 +1,16 @@
-//! OS-keychain-backed storage for secret variable values. Plaintext secret
-//! values never touch the `variables.value` SQLite column — only this module
-//! talks to the platform credential store, keyed by `var:{variable_id}`.
+//! OS-keychain-backed storage, keyed by a caller-supplied string. Plaintext
+//! secret values never touch a SQLite column — only this module talks to
+//! the platform credential store. Callers own their own key namespace by
+//! convention: variables use `var:{variable_id}` (see `store::variables`),
+//! auth secrets use `auth:{owner}:{slot}` (see `crate::auth`).
 //!
 //! The real backend is swapped for an in-memory fake under `cfg(test)`: the
 //! `keyring` v1 API installs its native store via a process-global `Once`,
 //! so unit tests would otherwise hit the developer's actual login keychain
-//! (permission prompts, leftover `var:{uuid}` entries, failures on a
-//! headless/CI box with no keychain at all). Every test variable id is a
-//! fresh UUID, so the fake needs no per-test isolation beyond the map itself.
+//! (permission prompts, leftover entries, failures on a headless/CI box
+//! with no keychain at all). Every test key is either a fresh UUID or
+//! scoped to its own test, so the fake needs no per-test isolation beyond
+//! the map itself.
 
 use serde::{Deserialize, Serialize};
 
@@ -26,30 +29,29 @@ mod backend {
 
     const SERVICE: &str = "restman";
 
-    fn entry(variable_id: &str) -> AppResult<Entry> {
-        Entry::new(SERVICE, &format!("var:{variable_id}"))
-            .map_err(|e| AppError::Other(format!("keychain unavailable: {e}")))
+    fn entry(key: &str) -> AppResult<Entry> {
+        Entry::new(SERVICE, key).map_err(|e| AppError::Other(format!("keychain unavailable: {e}")))
     }
 
-    pub fn set(variable_id: &str, value: &str) -> AppResult<()> {
+    pub fn set(key: &str, value: &str) -> AppResult<()> {
         if value.is_empty() {
-            return delete(variable_id);
+            return delete(key);
         }
-        entry(variable_id)?
+        entry(key)?
             .set_password(value)
             .map_err(|e| AppError::Other(format!("failed to write secret to keychain: {e}")))
     }
 
-    pub fn get(variable_id: &str) -> AppResult<Option<String>> {
-        match entry(variable_id)?.get_password() {
+    pub fn get(key: &str) -> AppResult<Option<String>> {
+        match entry(key)?.get_password() {
             Ok(v) => Ok(Some(v)),
             Err(KeyringError::NoEntry) => Ok(None),
             Err(e) => Err(AppError::Other(format!("failed to read secret from keychain: {e}"))),
         }
     }
 
-    pub fn delete(variable_id: &str) -> AppResult<()> {
-        match entry(variable_id)?.delete_credential() {
+    pub fn delete(key: &str) -> AppResult<()> {
+        match entry(key)?.delete_credential() {
             Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
             Err(e) => Err(AppError::Other(format!("failed to delete secret from keychain: {e}"))),
         }
@@ -80,20 +82,20 @@ mod backend {
     static STORE: LazyLock<Mutex<HashMap<String, String>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
 
-    pub fn set(variable_id: &str, value: &str) -> AppResult<()> {
+    pub fn set(key: &str, value: &str) -> AppResult<()> {
         if value.is_empty() {
-            return delete(variable_id);
+            return delete(key);
         }
-        STORE.lock().unwrap().insert(variable_id.to_string(), value.to_string());
+        STORE.lock().unwrap().insert(key.to_string(), value.to_string());
         Ok(())
     }
 
-    pub fn get(variable_id: &str) -> AppResult<Option<String>> {
-        Ok(STORE.lock().unwrap().get(variable_id).cloned())
+    pub fn get(key: &str) -> AppResult<Option<String>> {
+        Ok(STORE.lock().unwrap().get(key).cloned())
     }
 
-    pub fn delete(variable_id: &str) -> AppResult<()> {
-        STORE.lock().unwrap().remove(variable_id);
+    pub fn delete(key: &str) -> AppResult<()> {
+        STORE.lock().unwrap().remove(key);
         Ok(())
     }
 

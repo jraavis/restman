@@ -6,7 +6,7 @@
 
 import { useEffect, useRef } from "react";
 import { defaultRequest } from "../../lib/http";
-import type { Tab } from "../../lib/types";
+import { defaultRequestAuth, type Tab } from "../../lib/types";
 import { useRequestStore } from "../../stores/requestStore";
 import { useRequest } from "../collections/hooks";
 import { useCreateTab, useTabs } from "./hooks";
@@ -53,6 +53,7 @@ export function useTabSync(workspaceId: string | undefined) {
       collectionId: linkedRequest?.collectionId ?? null,
       title: activeTab.title,
       draft: activeTab.draft,
+      auth: linkedRequest?.auth ?? defaultRequestAuth(),
     });
   }, [activeTab, storeActiveTabId, linkedRequest, loadTab]);
 

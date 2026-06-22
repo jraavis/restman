@@ -28,7 +28,9 @@ export function CollectionsPanel() {
   const [tagFilter, setTagFilter] = useState("any");
   const [sortMode, setSortMode] = useState<SortMode>("manual");
   const dragRef = useRef<DragItem | null>(null);
-  const searching = query.trim().length > 0;
+  // A method/tag filter alone (no typed query) is also "searching" — the
+  // filter dropdowns below must work without first typing a search term.
+  const searching = query.trim().length > 0 || methodFilter !== "any" || tagFilter !== "any";
 
   function toggleExpand(id: string) {
     setExpandedIds((prev) => {
@@ -106,21 +108,19 @@ export function CollectionsPanel() {
             className="w-full rounded-md border border-slate-200 bg-transparent py-1 pl-6 pr-2 text-xs focus:outline-none focus:ring-2 focus:ring-accent/40 dark:border-slate-700"
           />
         </div>
-        {searching && (
-          <select
-            value={methodFilter}
-            onChange={(e) => setMethodFilter(e.target.value)}
-            className="shrink-0 rounded-md border border-slate-200 bg-transparent px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-accent/40 dark:border-slate-700"
-          >
-            <option value="any">Any method</option>
-            {HTTP_METHODS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        )}
-        {searching && tags && tags.length > 0 && (
+        <select
+          value={methodFilter}
+          onChange={(e) => setMethodFilter(e.target.value)}
+          className="shrink-0 rounded-md border border-slate-200 bg-transparent px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-accent/40 dark:border-slate-700"
+        >
+          <option value="any">Any method</option>
+          {HTTP_METHODS.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        {tags && tags.length > 0 && (
           <select
             value={tagFilter}
             onChange={(e) => setTagFilter(e.target.value)}

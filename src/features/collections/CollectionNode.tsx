@@ -4,10 +4,11 @@
 //! `RequestList` for why that's what makes the fetch lazy.
 
 import { useState, type DragEvent, type KeyboardEvent } from "react";
-import { ChevronDown, ChevronRight, Copy, FilePlus, FolderPlus, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, FilePlus, FolderPlus, Lock, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useDismissable } from "../../lib/useDismissable";
 import { defaultRequest } from "../../lib/http";
-import type { Collection } from "../../lib/types";
+import { defaultRequestAuth, type Collection } from "../../lib/types";
+import { CollectionAuthDialog } from "./CollectionAuthDialog";
 import {
   useCreateCollection,
   useCreateRequest,
@@ -47,6 +48,7 @@ export function CollectionNode({
   const [menuOpen, setMenuOpen] = useState(false);
   const [creating, setCreating] = useState<"folder" | "request" | null>(null);
   const [draftName, setDraftName] = useState("");
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const menuRef = useDismissable<HTMLDivElement>(() => setMenuOpen(false));
 
   const createCollection = useCreateCollection(workspaceId);
@@ -90,7 +92,7 @@ export function CollectionNode({
     }
     const saved = await createRequest.mutateAsync({
       collectionId: collection.id,
-      input: { name: trimmed, ...defaultRequest() },
+      input: { name: trimmed, ...defaultRequest(), auth: defaultRequestAuth() },
     });
     open(saved);
   }
@@ -223,6 +225,16 @@ export function CollectionNode({
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
+                  setAuthDialogOpen(true);
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Lock size={12} /> Auth…
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
                   if (
                     window.confirm(
                       `Delete "${collection.name}" and everything inside it? This can't be undone.`,
@@ -270,6 +282,14 @@ export function CollectionNode({
           )}
           <RequestList collectionId={collection.id} workspaceId={workspaceId} dragRef={dragRef} sortMode={sortMode} />
         </div>
+      )}
+
+      {authDialogOpen && (
+        <CollectionAuthDialog
+          collection={collection}
+          workspaceId={workspaceId}
+          onClose={() => setAuthDialogOpen(false)}
+        />
       )}
     </div>
   );

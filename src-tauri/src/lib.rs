@@ -1,3 +1,4 @@
+mod auth;
 mod commands;
 mod engine;
 mod error;
@@ -7,7 +8,7 @@ mod store;
 mod util;
 mod vars;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use store::AppState;
 use tauri::Manager;
 
@@ -24,14 +25,22 @@ pub fn run() {
             let mut conn = store::db::open(&db_path)?;
             store::workspaces::ensure_default(&mut conn)?;
             store::variables::migrate_plaintext_secrets_to_keychain(&conn);
+
+            let cookie_jar = Arc::new(reqwest_cookie_store::CookieStoreMutex::new(
+                reqwest_cookie_store::CookieStore::new(),
+            ));
+
             app.manage(AppState {
                 db: Mutex::new(conn),
+                cookie_jar,
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::send_request,
+            commands::start_oauth2_authorization,
+            commands::get_oauth2_status,
             commands::list_workspaces,
             commands::active_workspace,
             commands::create_workspace,
@@ -41,6 +50,7 @@ pub fn run() {
             commands::list_collections,
             commands::create_collection,
             commands::update_collection,
+            commands::update_collection_auth,
             commands::delete_collection,
             commands::move_collection,
             commands::reorder_collections,
@@ -85,6 +95,7 @@ pub fn run() {
             commands::close_tab,
             commands::close_other_tabs,
             commands::close_all_tabs,
+            commands::clear_cookies,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

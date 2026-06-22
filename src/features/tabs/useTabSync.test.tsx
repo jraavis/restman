@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultRequest } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
-import type { SavedRequest, Tab } from "../../lib/types";
+import { defaultRequestAuth, type SavedRequest, type Tab } from "../../lib/types";
 import { useRequestStore } from "../../stores/requestStore";
 import { useTabSync } from "./useTabSync";
 
@@ -42,6 +42,7 @@ function makeSavedRequest(overrides: Partial<SavedRequest> = {}): SavedRequest {
     query: [],
     body: { mode: "none" },
     options: defaultRequest().options,
+    auth: defaultRequestAuth(),
     tags: [],
     sortOrder: 0,
     createdAt: 0,
@@ -68,6 +69,7 @@ describe("useTabSync", () => {
       collectionId: null,
       title: "Untitled",
       request: defaultRequest(),
+      auth: defaultRequestAuth(),
       response: null,
       sending: false,
       error: null,
@@ -81,7 +83,9 @@ describe("useTabSync", () => {
       draft: { ...defaultRequest(), url: "https://a.test" },
     });
     vi.mocked(ipc.listTabs).mockResolvedValue([tabA]);
-    vi.mocked(ipc.getRequest).mockResolvedValue(makeSavedRequest({ collectionId: "col-1" }));
+    vi.mocked(ipc.getRequest).mockResolvedValue(
+      makeSavedRequest({ collectionId: "col-1", auth: { mode: "own", type: "bearer", token: "tok" } }),
+    );
 
     renderWithClient("ws-1");
 
@@ -90,6 +94,7 @@ describe("useTabSync", () => {
     });
     expect(useRequestStore.getState().collectionId).toBe("col-1");
     expect(useRequestStore.getState().request.url).toBe("https://a.test");
+    expect(useRequestStore.getState().auth).toEqual({ mode: "own", type: "bearer", token: "tok" });
   });
 
   it("does not reload — and so does not clobber an in-progress edit — when a refetch returns the same active tab id", async () => {

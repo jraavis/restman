@@ -12,6 +12,7 @@ export function useSaveRequest(workspaceId: string | undefined) {
   const activeTabId = useRequestStore((s) => s.activeTabId);
   const title = useRequestStore((s) => s.title);
   const request = useRequestStore((s) => s.request);
+  const auth = useRequestStore((s) => s.auth);
   const setRequestLink = useRequestStore((s) => s.setRequestLink);
 
   const createRequest = useCreateRequest(workspaceId);
@@ -37,6 +38,7 @@ export function useSaveRequest(workspaceId: string | undefined) {
       query: request.query,
       body: request.body,
       options: request.options,
+      auth,
     };
 
     if (requestId) {
