@@ -93,17 +93,26 @@ Landed between Phase 5 and Phase 6, on top of `2c08819`:
 - **Verification**: `cargo test` → 209 passed / 0 failed (+2 for `write_file_bytes`). `npx vitest run` → 94 passed / 17 files (+23: XML/filter helpers, `contentTypeOf`/`monacoLanguageFor`/`extensionFor`). `npx tsc --noEmit` clean. `cargo clippy --lib --quiet` → 12 pre-existing warnings, all in files untouched by this task (`model/auth.rs` ×4, `interop/{bruno,har,http_file}.rs`, `commands/{http,scripting}.rs`, `store/{collections,history}.rs`, `model/workspace_settings.rs`); zero new warnings introduced. Also fixed in passing: an unused `WorkspaceSettings` import this Interlude's own cleanup had mis-removed from `workspace.rs` (it's used by `#[cfg(test)]`, invisible to `cargo check --lib` but breaks `cargo test`) and an unused-variable warning on the same test module's `t` binding.
 - **Not yet live-browser-verified** — no dev server run yet this task; `npx tsc`/`vitest`/`cargo test` all green but the save-dialog flow and the new filter UI have not been clicked through in the actual app.
 
+### Phase 6, task 2 of 5 — Workspace settings UI ✅ complete
+
+- **Backend bug found and fixed first**: `store::workspace_settings::persist_cert_secrets` was missing the `SECRET_MASK`-skip guard that `auth::persist` already has (`src-tauri/src/auth/mod.rs:64-67`). Without it, the frontend panel below would silently destroy a saved client cert/key/passphrase on the very first unrelated save (e.g. editing the proxy URL), because `get()` returns those fields masked and any round-trip would write the literal `"••••••••"` string into the keychain. Fixed by adding `persist_secret_slot` (same skip-on-mask / clear-on-empty / set-and-mask contract, applied to all three Paste slots plus the Path-mode passphrase). Regression tests added: `resaving_already_masked_paste_cert_does_not_clobber_keychain`, `empty_passphrase_clears_the_slot_instead_of_storing_empty_string`. This was a latent bug from the Interlude (`ab35d67`), caught by re-reading the store layer before wiring a UI to it, not user-reported.
+- **Frontend**: `WorkspaceSettings`/`ClientCertConfig`/`ClientCertMode` TS mirrors + `emptyWorkspaceSettings`/`emptyClientCertConfig` helpers (`src/lib/types.ts`); `getWorkspaceSettings`/`setWorkspaceSettings` wrappers (`src/lib/ipc.ts`); `useWorkspaceSettings`/`useSetWorkspaceSettings` query hooks (`src/features/workspaces/hooks.ts`); new `WorkspaceSettingsDialog.tsx` (proxy URL/bypass, `KeyValueEditor`-based default-headers list, client-cert mode picker — Paste mode with masked-PEM textareas + "already saved, paste to replace" hint, Path mode with plain path inputs — both with an optional passphrase via `SecretInput`). `SecretInput`/`Field` promoted from private helpers in `AuthConfigFields.tsx` to exported ones rather than duplicated.
+- **Entry point**: new "Settings" item in `TopBar.tsx`'s workspace overflow menu (next to Rename/Delete), opening the dialog for the active workspace.
+- **Verification**: `cargo test` → 211 passed / 0 failed (+2 for the mask regression tests above). `npx vitest run` → 99 passed / 16 files (+5 for `WorkspaceSettingsDialog.test.tsx`). `npx tsc --noEmit` clean. `cargo clippy --lib --quiet` → 13 warnings, not 12 as previously logged — the prior count undercounted `commands/scripting.rs` (2 warnings, not 1); the file this task actually touched (`store/workspace_settings.rs`) has zero. No new warnings introduced.
+- **Not yet live-browser-verified** — same caveat as task 1: code review + automated tests only, dialog not yet clicked through in the running app.
+- **Follow-up flagged, not fixed here** (non-blocking per code review): switching/clearing a client-cert mode doesn't sweep the old keychain slots (e.g. Paste → None leaves the old cert/key/pass entries orphaned in the keychain rather than deleting them). `delete_cert_secrets` already exists and would cover it.
+
 ## Next
 
 **Phase 6** — confirmed with the user, in progress. Candidate scope:
 - ~~Response body pretty-print / JSON viewer / content-type-aware rendering, response filtering, save response to file.~~ ✅ done, see above.
+- ~~Per-workspace settings UI (proxy, default headers, client cert).~~ ✅ done, see above.
 - Request/response cookie visualization (cookie jar is already shared in the backend; surface it).
 - gRPC / WebSocket / SSE streaming client.
-- Per-workspace settings **UI** (proxy, default headers, client cert) — backend already done, see Interlude above; only the frontend panel remains.
 - Plugin system for custom codegen / custom import formats.
 
 ## How to resume in a new session
 
 1. Read this file first.
 2. `git log --oneline` to confirm the above hashes still match (this file will drift if more commits land without an update).
-3. Run `cargo test` and `npx vitest run` locally to confirm tests are green before continuing Phase 6. Expect 209 Rust tests / 94 frontend tests baseline.
+3. Run `cargo test` and `npx vitest run` locally to confirm tests are green before continuing Phase 6. Expect 211 Rust tests / 99 frontend tests baseline.

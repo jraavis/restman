@@ -3,7 +3,7 @@
 //! settings.
 
 import { useState } from "react";
-import { ChevronDown, MoreHorizontal, PanelLeft, Pencil, Plus, Settings, Trash2, Zap } from "lucide-react";
+import { ChevronDown, MoreHorizontal, PanelLeft, Pencil, Plus, Settings, Settings2, Trash2, Zap } from "lucide-react";
 import {
   useActiveWorkspace,
   useCreateWorkspace,
@@ -12,6 +12,7 @@ import {
   useUpdateWorkspace,
   useWorkspaces,
 } from "../features/workspaces/hooks";
+import { WorkspaceSettingsDialog } from "../features/workspaces/WorkspaceSettingsDialog";
 import { EnvironmentSwitcher } from "../features/environments/EnvironmentSwitcher";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { useDismissable } from "../lib/useDismissable";
@@ -26,6 +27,7 @@ export function TopBar() {
   const deleteWs = useDeleteWorkspace();
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [wsSettingsOpen, setWsSettingsOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -136,6 +138,17 @@ export function TopBar() {
               </button>
               <button
                 type="button"
+                disabled={!active}
+                onClick={() => {
+                  setWsMenuOpen(false);
+                  setWsSettingsOpen(true);
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+              >
+                <Settings2 size={12} /> Settings
+              </button>
+              <button
+                type="button"
                 disabled={!active || (workspaces?.length ?? 0) <= 1}
                 onClick={handleDeleteWorkspace}
                 title={(workspaces?.length ?? 0) <= 1 ? "Can't delete the only workspace" : undefined}
@@ -167,6 +180,13 @@ export function TopBar() {
       </div>
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {wsSettingsOpen && active && (
+        <WorkspaceSettingsDialog
+          workspaceId={active.id}
+          workspaceName={active.name}
+          onClose={() => setWsSettingsOpen(false)}
+        />
+      )}
     </header>
   );
 }

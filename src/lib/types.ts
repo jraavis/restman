@@ -117,6 +117,49 @@ export interface OAuth2Status {
 }
 
 // ---------------------------------------------------------------------------
+// Workspace transport settings (Interlude / Phase 6) — mirrors
+// `model::workspace_settings::{ClientCertConfig, WorkspaceSettings}`
+// ---------------------------------------------------------------------------
+
+export type ClientCertMode = "none" | "paste" | "path";
+
+/** Adjacently-tagged (`mode` + `data`) — mirrors serde's
+ * `#[serde(tag = "mode", content = "data")]`. `paste`'s `certPem`/`keyPem`/
+ * `passphrase` are masked (`SECRET_MASK`) whenever they cross IPC for
+ * display; round-tripping them unchanged means "keep the stored value",
+ * same contract as every other secret field in this app. */
+export type ClientCertConfig =
+  | { mode: "none" }
+  | { mode: "paste"; data: { certPem: string; keyPem: string; passphrase: string | null } }
+  | { mode: "path"; data: { certPath: string; keyPath: string; passphrase: string | null } };
+
+export interface WorkspaceSettings {
+  workspaceId: string;
+  proxyUrl: string | null;
+  proxyBypass: string | null;
+  defaultHeaders: HeaderEntry[];
+  clientCert: ClientCertConfig;
+}
+
+export function emptyWorkspaceSettings(workspaceId: string): WorkspaceSettings {
+  return { workspaceId, proxyUrl: null, proxyBypass: null, defaultHeaders: [], clientCert: { mode: "none" } };
+}
+
+/** Fresh `ClientCertConfig` for `mode` — for switching the mode picker
+ * without carrying over stale fields from whatever mode was selected
+ * before. */
+export function emptyClientCertConfig(mode: ClientCertMode): ClientCertConfig {
+  switch (mode) {
+    case "none":
+      return { mode: "none" };
+    case "paste":
+      return { mode: "paste", data: { certPem: "", keyPem: "", passphrase: null } };
+    case "path":
+      return { mode: "path", data: { certPath: "", keyPath: "", passphrase: null } };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Scripting / test runner types
 // ---------------------------------------------------------------------------
 
