@@ -40,7 +40,7 @@ export const inputClass =
 
 type AuthScope = { collectionId?: string | null; requestId?: string | null };
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="text-xs text-slate-500 dark:text-slate-400">{label}</span>
@@ -49,7 +49,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function SecretInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function SecretInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [revealed, setRevealed] = useState(false);
   return (
     <div className="flex items-center gap-1">

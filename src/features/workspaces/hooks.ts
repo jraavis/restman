@@ -2,10 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc";
+import type { WorkspaceSettings } from "../../lib/types";
 
 export const workspaceKeys = {
   all: ["workspaces"] as const,
   active: ["workspaces", "active"] as const,
+  settings: (workspaceId: string) => ["workspaces", "settings", workspaceId] as const,
 };
 
 export function useWorkspaces() {
@@ -55,6 +57,24 @@ export function useDeleteWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.all });
       qc.invalidateQueries({ queryKey: workspaceKeys.active });
+    },
+  });
+}
+
+export function useWorkspaceSettings(workspaceId: string | undefined) {
+  return useQuery({
+    queryKey: workspaceKeys.settings(workspaceId ?? ""),
+    queryFn: () => ipc.getWorkspaceSettings(workspaceId as string),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useSetWorkspaceSettings(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: WorkspaceSettings) => ipc.setWorkspaceSettings(settings),
+    onSuccess: (saved) => {
+      qc.setQueryData(workspaceKeys.settings(workspaceId), saved);
     },
   });
 }

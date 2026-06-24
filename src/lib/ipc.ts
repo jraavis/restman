@@ -31,6 +31,7 @@ import type {
   VarScope,
   Variable,
   VariableInput,
+  WorkspaceSettings,
 } from "./types";
 
 export interface Workspace {
@@ -60,6 +61,10 @@ export const ipc = {
   updateWorkspace: (id: string, name: string) => invoke<Workspace>("update_workspace", { id, name }),
   deleteWorkspace: (id: string) => invoke<void>("delete_workspace", { id }),
   setActiveWorkspace: (id: string) => invoke<void>("set_active_workspace", { id }),
+  getWorkspaceSettings: (workspaceId: string) =>
+    invoke<WorkspaceSettings>("get_workspace_settings", { workspaceId }),
+  setWorkspaceSettings: (settings: WorkspaceSettings) =>
+    invoke<WorkspaceSettings>("set_workspace_settings", { settings }),
 
   // Collections
   listCollections: (workspaceId: string) => invoke<Collection[]>("list_collections", { workspaceId }),
