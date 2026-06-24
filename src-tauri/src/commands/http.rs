@@ -329,3 +329,31 @@ pub fn delete_cookie(state: State<'_, AppState>, domain: String, path: String, n
         .remove(&domain, &path, &name);
     Ok(())
 }
+
+#[cfg(test)]
+mod cookie_tests {
+    use cookie_store::CookieStore;
+    use url::Url;
+
+    /// `list_cookies` extracts `domain`/`path`/`name` via `String::from(&c.domain)` /
+    /// `String::from(&c.path)` / `c.name().to_string()` — the same conversions
+    /// `CookieStore::insert` uses as its map keys — and `delete_cookie` forwards them
+    /// verbatim to `remove()`. This locks that the round-trip actually removes the
+    /// cookie instead of silently no-op'ing on a mismatched key.
+    #[test]
+    fn list_then_delete_round_trip_removes_cookie() {
+        let mut store = CookieStore::default();
+        let url = Url::parse("https://example.com/").unwrap();
+        store.parse("session_id=abc123", &url).unwrap();
+
+        let c = store.iter_unexpired().next().unwrap();
+        let (domain, path, name) = (
+            String::from(&c.domain),
+            String::from(&c.path),
+            c.name().to_string(),
+        );
+
+        assert!(store.remove(&domain, &path, &name).is_some());
+        assert_eq!(store.iter_unexpired().count(), 0);
+    }
+}
