@@ -20,6 +20,72 @@ export function prettyJson(text: string): string | null {
   }
 }
 
+/** Reformat XML/HTML-ish markup with 2-space indentation; returns null if
+ * the text doesn't parse as XML (callers fall back to plain text). */
+export function prettyXml(text: string): string | null {
+  if (!text.trim().startsWith("<")) return null;
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  if (doc.querySelector("parsererror")) return null;
+  if (!doc.documentElement) return null;
+
+  const lines: string[] = [];
+  const walk = (el: Element, depth: number) => {
+    const indent = "  ".repeat(depth);
+    const attrs = Array.from(el.attributes)
+      .map((a) => ` ${a.name}="${a.value}"`)
+      .join("");
+    const children = Array.from(el.childNodes).filter(
+      (n) => n.nodeType !== Node.TEXT_NODE || !!n.textContent?.trim(),
+    );
+    const childElements = children.filter((n) => n.nodeType === Node.ELEMENT_NODE);
+    if (children.length === 0) {
+      lines.push(`${indent}<${el.tagName}${attrs}/>`);
+    } else if (childElements.length === 0) {
+      const inline = children.map((n) => n.textContent?.trim() ?? "").join("");
+      lines.push(`${indent}<${el.tagName}${attrs}>${inline}</${el.tagName}>`);
+    } else {
+      lines.push(`${indent}<${el.tagName}${attrs}>`);
+      childElements.forEach((n) => walk(n as Element, depth + 1));
+      lines.push(`${indent}</${el.tagName}>`);
+    }
+  };
+  walk(doc.documentElement, 0);
+  return lines.join("\n");
+}
+
+/** Keep only object/array entries whose key or primitive value contains
+ * `query` (case-insensitive); a matching key keeps its whole subtree.
+ * Returns `undefined` when nothing in the subtree matches. */
+export function filterJsonValue(value: unknown, query: string): unknown {
+  const q = query.toLowerCase();
+  if (!q) return value;
+  if (Array.isArray(value)) {
+    const out = value.map((v) => filterJsonValue(v, query)).filter((v) => v !== undefined);
+    return out.length > 0 ? out : undefined;
+  }
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k.toLowerCase().includes(q)) {
+        out[k] = v;
+        continue;
+      }
+      const filtered = filterJsonValue(v, query);
+      if (filtered !== undefined) out[k] = filtered;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+  return String(value).toLowerCase().includes(q) ? value : undefined;
+}
+
+/** Line-based filter for non-JSON bodies: keep lines containing `query`. */
+export function filterLines(text: string, query: string): string {
+  if (!query.trim()) return text;
+  const q = query.toLowerCase();
+  const lines = text.split("\n").filter((l) => l.toLowerCase().includes(q));
+  return lines.length > 0 ? lines.join("\n") : "(no matching lines)";
+}
+
 /** Classic `xxd`-style hex + ASCII dump. */
 export function formatHex(bytes: Uint8Array, maxBytes = 64 * 1024): string {
   const limit = Math.min(bytes.length, maxBytes);

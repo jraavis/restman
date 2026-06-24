@@ -15,7 +15,6 @@ use crate::model::ClientCertConfig;
 use crate::model::http::{HeaderEntry, HttpRequest};
 use crate::secrets;
 use crate::store::workspace_settings;
-use crate::model::WorkspaceSettings;
 use rusqlite::Connection;
 
 /// Read the workspace's settings row, hydrate secret cert bytes, and
@@ -115,6 +114,7 @@ fn build_identity(workspace_id: &str, cert: &ClientCertConfig) -> AppResult<Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::WorkspaceSettings;
 
     fn mem() -> Connection {
         let mut conn = crate::store::db::open_in_memory().unwrap();
@@ -213,7 +213,7 @@ mod tests {
             },
         };
         workspace_settings::set(&conn, &s).unwrap();
-        let t = resolve_transport(&conn, &ws).unwrap().unwrap();
+        let _t = resolve_transport(&conn, &ws).unwrap().unwrap();
         // `from_pem` on toy bytes may fail on some tls backends, so only
         // assert the happy path: the cert/key bytes were retrieved from the
         // keychain (resolved_structure), and identity parsing is attempted.
