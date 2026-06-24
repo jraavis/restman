@@ -38,6 +38,10 @@ export interface RequestOptions {
   followRedirects: boolean;
   verifySsl: boolean;
   maxRedirects: number;
+  /** When true, the engine uses the shared cookie jar: Set-Cookie responses
+   * are stored and Cookie headers replayed on subsequent sends. Mirrors
+   * the Rust `RequestOptions::send_cookies` field. */
+  sendCookies: boolean;
 }
 
 export interface HttpRequest {
@@ -81,6 +85,7 @@ export function defaultRequest(): HttpRequest {
       followRedirects: true,
       verifySsl: true,
       maxRedirects: 10,
+      sendCookies: false,
     },
   };
 }

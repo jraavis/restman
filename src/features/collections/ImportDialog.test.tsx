@@ -66,7 +66,7 @@ describe("ImportDialog", () => {
             headers: [],
             query: [],
             body: { mode: "none" },
-            options: { timeoutSecs: 30, followRedirects: true, verifySsl: true, maxRedirects: 10 },
+            options: { timeoutSecs: 30, followRedirects: true, verifySsl: true, maxRedirects: 10, sendCookies: false },
             auth: { mode: "inherit" },
             preRequestScript: "",
             postResponseScript: "",

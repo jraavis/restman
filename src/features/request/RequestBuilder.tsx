@@ -234,6 +234,11 @@ export function RequestBuilder() {
               onChange={(v) => setOptions({ verifySsl: v })}
               label="Verify SSL certificate"
             />
+            <Switch
+              checked={request.options.sendCookies}
+              onChange={(v) => setOptions({ sendCookies: v })}
+              label="Send cookies (shared jar)"
+            />
           </div>
         )}
       </div>
