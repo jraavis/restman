@@ -735,15 +735,16 @@ fn param_example_v2(p: &Value) -> String {
 fn resolve_security_v2(security: &[Value], schemes: &Value, warnings: &mut Vec<String>) -> AuthConfig {
     let Some(first) = security.first() else { return AuthConfig::None };
     let Some(req) = first.as_object() else { return AuthConfig::None };
-    let Some((scheme_name, _scopes)) = req.iter().next() else { return AuthConfig::None };
+    let Some((scheme_name, scopes)) = req.iter().next() else { return AuthConfig::None };
     let Some(scheme) = schemes.get(scheme_name) else {
         warnings.push(format!("security scheme \"{scheme_name}\" is not defined in securityDefinitions — skipped"));
         return AuthConfig::None;
     };
-    security_scheme_to_auth_v2(scheme_name, scheme, warnings)
+    let scopes: Vec<String> = scopes.as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    security_scheme_to_auth_v2(scheme_name, scheme, &scopes, warnings)
 }
 
-fn security_scheme_to_auth_v2(name: &str, scheme: &Value, warnings: &mut Vec<String>) -> AuthConfig {
+fn security_scheme_to_auth_v2(name: &str, scheme: &Value, scopes: &[String], warnings: &mut Vec<String>) -> AuthConfig {
     match scheme.get("type").and_then(Value::as_str) {
         Some("basic") => AuthConfig::Basic { username: String::new(), password: String::new() },
         Some("apiKey") => {
@@ -756,8 +757,10 @@ fn security_scheme_to_auth_v2(name: &str, scheme: &Value, warnings: &mut Vec<Str
         Some("oauth2") => {
             let token_url = scheme.get("tokenUrl").and_then(Value::as_str).unwrap_or_default().to_string();
             let auth_url = scheme.get("authorizationUrl").and_then(Value::as_str).unwrap_or_default().to_string();
-            let scope =
-                scheme.get("scopes").and_then(Value::as_object).map(|m| m.keys().cloned().collect::<Vec<_>>().join(" ")).unwrap_or_default();
+            // Swagger 2.0's `scopes` map sits flat on the scheme itself
+            // (there's no per-flow nesting like 3.0's `flows.X.scopes`), so
+            // `flow_scope` — written for 3.0's flow objects — applies as-is.
+            let scope = flow_scope(scheme, &scopes.join(" "));
             match scheme.get("flow").and_then(Value::as_str) {
                 Some("accessCode") => {
                     AuthConfig::OAuth2(OAuth2Config { grant_type: OAuth2GrantType::AuthorizationCode, auth_url, token_url, scope, ..Default::default() })
@@ -1375,5 +1378,227 @@ mod tests {
         let op = v.pointer("/paths/~1admin~1users/get").expect("path+method present");
         assert!(op["security"][0].get("basicAuth").is_some(), "{op}");
         assert!(v["security"][0].get("bearerAuth").is_some(), "{v}");
+    }
+
+    const SWAGGER_FIXTURE: &str = r#"{
+        "swagger": "2.0",
+        "info": { "title": "Petstore2", "description": "Sample pet store API (v2)", "version": "1.0.0" },
+        "host": "petstore.example.com",
+        "basePath": "/v2",
+        "schemes": ["https"],
+        "security": [{ "basicAuth": [] }],
+        "securityDefinitions": {
+            "basicAuth": { "type": "basic" },
+            "apiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-API-Key" }
+        },
+        "paths": {
+            "/pets/{petId}": {
+                "parameters": [
+                    { "name": "petId", "in": "path", "required": true, "type": "string" }
+                ],
+                "get": {
+                    "tags": ["Pets"],
+                    "summary": "Get pet by id",
+                    "parameters": [{ "name": "verbose", "in": "query", "type": "string", "default": "true" }],
+                    "responses": { "200": { "description": "ok" } }
+                },
+                "delete": {
+                    "tags": ["Pets"],
+                    "summary": "Delete pet",
+                    "security": [],
+                    "responses": { "204": { "description": "deleted" } }
+                }
+            },
+            "/pets": {
+                "post": {
+                    "tags": ["Pets"],
+                    "summary": "Create pet",
+                    "parameters": [
+                        {
+                            "name": "body",
+                            "in": "body",
+                            "required": true,
+                            "schema": { "type": "object", "properties": { "name": { "type": "string", "example": "Fido" } } }
+                        }
+                    ],
+                    "security": [{ "apiKeyAuth": [] }],
+                    "responses": { "201": { "description": "created" } }
+                }
+            },
+            "/pets/{petId}/photo": {
+                "post": {
+                    "summary": "Upload photo",
+                    "consumes": ["multipart/form-data"],
+                    "parameters": [
+                        { "name": "petId", "in": "path", "required": true, "type": "string" },
+                        { "name": "caption", "in": "formData", "type": "string", "default": "cute dog" },
+                        { "name": "photo", "in": "formData", "type": "file" }
+                    ],
+                    "responses": { "default": { "description": "ok" } }
+                }
+            },
+            "/login": {
+                "post": {
+                    "summary": "Login",
+                    "consumes": ["application/x-www-form-urlencoded"],
+                    "parameters": [
+                        { "name": "user", "in": "formData", "type": "string", "default": "alice" }
+                    ],
+                    "responses": { "default": { "description": "ok" } }
+                }
+            },
+            "/unknown-scheme": {
+                "get": {
+                    "summary": "Uses an undefined scheme",
+                    "security": [{ "missingScheme": [] }],
+                    "responses": { "default": { "description": "ok" } }
+                }
+            }
+        }
+    }"#;
+
+    #[test]
+    fn imports_realistic_swagger2_fixture_with_expected_shape_and_warnings() {
+        let preview = parse(SWAGGER_FIXTURE).unwrap();
+        assert_eq!(preview.root.name, "Petstore2");
+        assert_eq!(preview.root.description, Some("Sample pet store API (v2)".to_string()));
+        assert_eq!(preview.root.auth, AuthConfig::Basic { username: String::new(), password: String::new() });
+
+        assert_eq!(preview.stats.requests, 6);
+        assert_eq!(preview.stats.folders, 1);
+        assert_eq!(preview.root.children.len(), 1);
+        let pets = &preview.root.children[0];
+        assert_eq!(pets.name, "Pets");
+        assert_eq!(pets.requests.len(), 3);
+        assert_eq!(preview.root.requests.len(), 3);
+
+        let get_pet = find_request(&preview.root, "Get pet by id");
+        assert_eq!(get_pet.method, "GET");
+        assert_eq!(get_pet.url, "https://petstore.example.com/v2/pets/{{petId}}");
+        assert_eq!(get_pet.auth, RequestAuth::Inherit);
+        assert_eq!(get_pet.query, vec![KeyValue { key: "verbose".into(), value: "true".into(), enabled: true }]);
+
+        let delete_pet = find_request(&preview.root, "Delete pet");
+        assert_eq!(delete_pet.method, "DELETE");
+        assert_eq!(delete_pet.auth, RequestAuth::Own(AuthConfig::None));
+
+        let create_pet = find_request(&preview.root, "Create pet");
+        assert_eq!(create_pet.method, "POST");
+        assert_eq!(create_pet.url, "https://petstore.example.com/v2/pets");
+        assert_eq!(
+            create_pet.auth,
+            RequestAuth::Own(AuthConfig::ApiKey { key: "X-API-Key".into(), value: String::new(), location: ApiKeyLocation::Header })
+        );
+        match &create_pet.body {
+            RequestBody::Json(s) => assert_eq!(serde_json::from_str::<Value>(s).unwrap(), json!({"name": "Fido"})),
+            other => panic!("expected Json body, got {other:?}"),
+        }
+
+        let photo = find_request(&preview.root, "Upload photo");
+        assert_eq!(photo.url, "https://petstore.example.com/v2/pets/{{petId}}/photo");
+        match &photo.body {
+            RequestBody::FormData(fields) => {
+                let caption = fields.iter().find(|f| f.key == "caption").unwrap();
+                assert_eq!(caption.value, "cute dog");
+                assert!(!caption.is_file);
+                let file = fields.iter().find(|f| f.key == "photo").unwrap();
+                assert!(file.is_file);
+                assert_eq!(file.value, "");
+            }
+            other => panic!("expected FormData body, got {other:?}"),
+        }
+
+        let login = find_request(&preview.root, "Login");
+        match &login.body {
+            RequestBody::UrlEncoded(fields) => {
+                assert_eq!(fields, &vec![KeyValue { key: "user".into(), value: "alice".into(), enabled: true }]);
+            }
+            other => panic!("expected UrlEncoded body, got {other:?}"),
+        }
+
+        let unknown = find_request(&preview.root, "Uses an undefined scheme");
+        assert_eq!(unknown.auth, RequestAuth::Own(AuthConfig::None));
+        assert!(preview.warnings.iter().any(|w| w.contains("missingScheme")), "{:?}", preview.warnings);
+    }
+
+    #[test]
+    fn swagger2_oauth2_access_code_flow_honors_requested_scopes_over_scheme_defaults() {
+        // The scheme defines two scopes, but the security requirement only
+        // asks for one — the requested scope must win, not the full set
+        // defined on the scheme (that fallback only applies when nothing was
+        // actually requested, e.g. an empty `[]`).
+        let spec = r#"{
+            "swagger": "2.0",
+            "info": {"title": "X", "version": "1.0"},
+            "securityDefinitions": {
+                "oauth": {
+                    "type": "oauth2",
+                    "flow": "accessCode",
+                    "authorizationUrl": "https://auth.example.com/authorize",
+                    "tokenUrl": "https://auth.example.com/token",
+                    "scopes": {"read": "Read access", "write": "Write access"}
+                }
+            },
+            "security": [{"oauth": ["read"]}],
+            "paths": {}
+        }"#;
+        let preview = parse(spec).unwrap();
+        assert_eq!(
+            preview.root.auth,
+            AuthConfig::OAuth2(OAuth2Config {
+                grant_type: OAuth2GrantType::AuthorizationCode,
+                auth_url: "https://auth.example.com/authorize".into(),
+                token_url: "https://auth.example.com/token".into(),
+                scope: "read".into(),
+                ..Default::default()
+            })
+        );
+    }
+
+    #[test]
+    fn swagger2_oauth2_implicit_flow_imports_as_no_auth_with_a_warning() {
+        let spec = r#"{
+            "swagger": "2.0",
+            "info": {"title": "X", "version": "1.0"},
+            "securityDefinitions": {
+                "oauth": {"type": "oauth2", "flow": "implicit", "authorizationUrl": "https://a.test/auth", "scopes": {}}
+            },
+            "security": [{"oauth": []}],
+            "paths": {}
+        }"#;
+        let preview = parse(spec).unwrap();
+        assert_eq!(preview.root.auth, AuthConfig::None);
+        assert!(preview.warnings.iter().any(|w| w.contains("implicit")), "{:?}", preview.warnings);
+    }
+
+    #[test]
+    fn swagger2_round_trips_through_openapi3_export() {
+        // Export always emits OpenAPI 3.0 regardless of the original import
+        // format (see module doc) — re-parsing that output is a cross-format
+        // round trip, not a same-format one, so only method+url and the
+        // tag-derived folder are asserted, same as the 3.0 round-trip test.
+        let preview_a = parse(SWAGGER_FIXTURE).unwrap();
+        let exported = export(&preview_a.root).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&exported).unwrap()["openapi"], json!("3.0.3"));
+        let preview_b = parse(&exported).unwrap();
+
+        let mut a = Vec::new();
+        all_requests(&preview_a.root, &mut a);
+        let mut b = Vec::new();
+        all_requests(&preview_b.root, &mut b);
+        let a_set: BTreeSet<_> = a.iter().map(|r| (r.method.clone(), r.url.clone())).collect();
+        let b_set: BTreeSet<_> = b.iter().map(|r| (r.method.clone(), r.url.clone())).collect();
+        assert_eq!(a_set, b_set);
+
+        let a_folders: BTreeSet<_> = preview_a.root.children.iter().map(|c| c.name.clone()).collect();
+        let b_folders: BTreeSet<_> = preview_b.root.children.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(a_folders, b_folders);
+    }
+
+    #[test]
+    fn parse_rejects_a_document_with_neither_openapi_nor_swagger_version_field() {
+        let spec = r#"{"info": {"title": "X"}, "paths": {}}"#;
+        let err = parse(spec).unwrap_err();
+        assert!(err.to_string().contains("openapi") && err.to_string().contains("swagger"), "{err}");
     }
 }
