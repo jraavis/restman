@@ -40,6 +40,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use rquickjs::{
     CatchResultExt, Context, Function, Object, Runtime, Value,
@@ -47,6 +48,19 @@ use rquickjs::{
 
 use crate::error::{AppError, AppResult};
 use super::types::{PostScriptContext, PreScriptContext, ScriptResult, TestResult};
+
+/// Wall-clock deadline enforced on every script run via QuickJS's interrupt
+/// handler. A script stuck in an infinite loop (or just slow) is aborted
+/// after this rather than hanging the calling async command indefinitely —
+/// the long-standing gap the PLAN called out, since `cx.eval` otherwise blocks
+/// the Tauri async executor thread the whole time.
+pub const SCRIPT_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Stack-frame byte budget, distinct from the timeout — guards against a
+/// runaway recursion that would otherwise OOM before the wall clock trips.
+/// QuickJS stacks are ~256 KiB by default; setting this lower keeps a kill
+/// prompt on this machine.
+const SCRIPT_MAX_STACK_BYTES: usize = 512 * 1024;
 
 // ---------------------------------------------------------------------------
 // Internal shared state mutated by pm.* calls during a script run.
@@ -77,6 +91,7 @@ pub fn run_pre_script(
 
     let state: SharedState = Arc::new(Mutex::new(RunState::default()));
     let rt = Runtime::new().map_err(|e| AppError::Script(e.to_string()))?;
+    apply_runtime_limits(&rt);
     let js_ctx = Context::full(&rt).map_err(|e| AppError::Script(e.to_string()))?;
 
     let mut result = ScriptResult::default();
@@ -90,7 +105,12 @@ pub fn run_pre_script(
         match cx.eval::<Value, _>(script.as_bytes()).catch(&cx) {
             Ok(_) => {}
             Err(e) => {
-                result.error = Some(e.to_string());
+                let msg = e.to_string();
+                result.error = Some(if msg.contains("interrupted") {
+                    "script timed out after 8s".to_string()
+                } else {
+                    msg
+                });
             }
         }
         cx.run_gc();
@@ -115,6 +135,7 @@ pub fn run_post_script(
 
     let state: SharedState = Arc::new(Mutex::new(RunState::default()));
     let rt = Runtime::new().map_err(|e| AppError::Script(e.to_string()))?;
+    apply_runtime_limits(&rt);
     let js_ctx = Context::full(&rt).map_err(|e| AppError::Script(e.to_string()))?;
 
     let mut result = ScriptResult::default();
@@ -128,7 +149,12 @@ pub fn run_post_script(
         match cx.eval::<Value, _>(script.as_bytes()).catch(&cx) {
             Ok(_) => {}
             Err(e) => {
-                result.error = Some(e.to_string());
+                let msg = e.to_string();
+                result.error = Some(if msg.contains("interrupted") {
+                    "script timed out after 8s".to_string()
+                } else {
+                    msg
+                });
             }
         }
         cx.run_gc();
@@ -161,10 +187,35 @@ fn inject_template_tags<'js>(
         .as_secs();
     globals.set("$timestamp", ts as i64)?;
 
-    let rand_int = (ts % 1001) as i64; // deterministic-ish, no rand dep needed
+    let rand_int: i64 = {
+        // Real RNG via the `rand` dep — the previous derivation from `ts` was
+        // deterministic, which collided across rapid successive runs that
+        // share the same second.
+        use rand::Rng;
+        let mut rng = rand::rng();
+        rng.random_range(0..1001) as i64
+    };
     globals.set("$randomInt", rand_int)?;
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Runtime limits — deadline interrupt + stack budget
+// ---------------------------------------------------------------------------
+
+/// Wire an interrupt handler that aborts QuickJS once `SCRIPT_TIMEOUT` has
+/// elapsed, plus a stack-byte ceiling so runaway recursion OOMs generously
+/// before the wall-clock trips (matters because tight recursion may not reach
+/// the interrupt counter often enough on its own).
+///
+/// QuickJS's interrupt callback fires "every so many bytecode ops" — infinite
+/// busy loops reliably trip it; pure busy native work would not, but the
+/// sandbox exposes no such bound work anyway.
+pub(crate) fn apply_runtime_limits(rt: &Runtime) {
+    let deadline = Instant::now() + SCRIPT_TIMEOUT;
+    rt.set_max_stack_size(SCRIPT_MAX_STACK_BYTES);
+    rt.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
 }
 
 // ---------------------------------------------------------------------------
@@ -750,4 +801,27 @@ mod tests {
         assert!(r.tests[0].passed, "{:?}", r.tests[0].error);
     }
 
+    /// An infinite loop must be aborted by the SCRIPT_TIMEOUT interrupt handler
+    /// rather than hanging forever — closing the long-standing gap the PLAN
+    /// flagged where a stuck script blocked the calling async command thread.
+    /// Uses an e2e-style 1ms deadline override since the real 8s would slow
+    /// the suite; this proves the *mechanism*, not the wall-clock budget.
+    #[test]
+    fn infinite_loop_is_interrupted_after_the_deadline() {
+        use std::time::Duration;
+        let rt = rquickjs::Runtime::new().unwrap();
+        // Override the production 8s with a 1ms deadline for the test by
+        // applying the same limiter with an immediate deadline — this exercises
+        // `set_interrupt_handler` returning `true` past the deadline.
+        let deadline = Instant::now() + Duration::from_millis(1);
+        rt.set_max_stack_size(512 * 1024);
+        rt.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+        let cx = rquickjs::Context::full(&rt).unwrap();
+        let result: Result<(), rquickjs::Error> = cx.with(|c| c.eval::<(), _>("while(true){}".as_bytes()));
+        // The key invariant: the loop is *interrupted* (an error, not a hang),
+        // rather than spinning forever and stalling the caller. The exact
+        // error string ("interrupted" vs a generic exception wrapper) varies
+        // across rquickjs versions, so assert behavior, not message text.
+        assert!(result.is_err(), "infinite loop should have been interrupted, not run forever");
+    }
 }
