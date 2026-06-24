@@ -10,6 +10,7 @@ pub mod request;
 pub mod tab;
 pub mod tag;
 pub mod variable;
+pub mod workspace_settings;
 
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +22,7 @@ pub use request::{SavedRequest, SavedRequestInput};
 pub use tab::Tab;
 pub use tag::Tag;
 pub use variable::{VarScope, VarType, Variable, VariableInput, SECRET_MASK};
+pub use workspace_settings::{ClientCertConfig, WorkspaceSettings};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

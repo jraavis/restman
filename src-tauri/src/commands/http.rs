@@ -77,7 +77,9 @@ pub async fn send_request(
                 .collect(),
             env: resolved.values.clone(),
         };
-        let r = run_pre_script(&pre_script_src, &ctx)?;
+        let r = tokio::task::spawn_blocking(move || run_pre_script(&pre_script_src, &ctx))
+            .await
+            .map_err(|e| crate::error::AppError::Other(format!("pre-request script task panicked: {e}")))??;
         // Collect env mutations so post-script and interpolation see them.
         for (k, v) in &r.env_mutations {
             env_overrides.insert(k.clone(), v.clone());
@@ -101,9 +103,19 @@ pub async fn send_request(
         crate::vars::interpolate_request(&mut req, &merged);
     }
 
+    // 4b. Apply per-workspace transport config: inline default headers
+    //     (user headers win) and resolve proxy + mTLS identity from the
+    //     workspace settings row, hydrating any pasted PEM bytes from the
+    //     keychain / reading path-mode PEMs from disk.
+    let transport = {
+        let conn = state.db.lock().unwrap();
+        crate::workspace::apply_default_headers(&mut req, &conn, &workspace_id)?;
+        crate::workspace::resolve_transport(&conn, &workspace_id)?
+    };
+
     // 5. Send.
     let label = name.unwrap_or_else(|| format!("{} {}", req.method, req.url));
-    let result = crate::engine::http::send(req.clone(), Some(Arc::clone(&state.cookie_jar))).await;
+    let result = crate::engine::http::send(req.clone(), Some(Arc::clone(&state.cookie_jar)), transport.as_ref()).await;
 
     // 6. Run post-response script (only if the send succeeded).
     let post_result = if !post_script_src.trim().is_empty() {
@@ -132,7 +144,11 @@ pub async fn send_request(
                     e
                 },
             };
-            Some(run_post_script(&post_script_src, &ctx)?)
+            Some(
+                tokio::task::spawn_blocking(move || run_post_script(&post_script_src, &ctx))
+                    .await
+                    .map_err(|e| crate::error::AppError::Other(format!("post-response script task panicked: {e}")))??,
+            )
         } else {
             None
         }

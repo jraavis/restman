@@ -16,8 +16,12 @@ use reqwest_cookie_store::CookieStoreMutex;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-pub async fn send(req: HttpRequest, cookie_jar: Option<Arc<CookieStoreMutex>>) -> AppResult<HttpResponse> {
-    let client = build_client(&req.options, cookie_jar)?;
+pub async fn send(
+    req: HttpRequest,
+    cookie_jar: Option<Arc<CookieStoreMutex>>,
+    transport: Option<&TransportOverrides>,
+) -> AppResult<HttpResponse> {
+    let client = build_client(&req.options, cookie_jar, transport)?;
 
     let method = Method::from_bytes(req.method.trim().as_bytes())
         .map_err(|_| AppError::Other(format!("invalid HTTP method: {}", req.method)))?;
@@ -87,7 +91,11 @@ pub async fn send(req: HttpRequest, cookie_jar: Option<Arc<CookieStoreMutex>>) -
     })
 }
 
-fn build_client(opts: &RequestOptions, cookie_jar: Option<Arc<CookieStoreMutex>>) -> AppResult<Client> {
+fn build_client(
+    opts: &RequestOptions,
+    cookie_jar: Option<Arc<CookieStoreMutex>>,
+    transport: Option<&TransportOverrides>,
+) -> AppResult<Client> {
     let redirect = if opts.follow_redirects {
         reqwest::redirect::Policy::limited(opts.max_redirects)
     } else {
@@ -102,7 +110,37 @@ fn build_client(opts: &RequestOptions, cookie_jar: Option<Arc<CookieStoreMutex>>
             builder = builder.cookie_provider(jar);
         }
     }
+    if let Some(t) = transport {
+        if let Some(proxy_url) = t.proxy_url.as_deref() {
+            if !proxy_url.trim().is_empty() {
+                let mut proxy = reqwest::Proxy::all(proxy_url)
+                    .map_err(|e| AppError::Other(format!("invalid proxy \"{proxy_url}\": {e}")))?;
+                if let Some(bypass) = t.proxy_bypass.as_deref() {
+                    if !bypass.trim().is_empty() {
+                        proxy = proxy.no_proxy(reqwest::NoProxy::from_string(bypass));
+                    }
+                }
+                builder = builder.proxy(proxy);
+            }
+        }
+        if let Some(identity) = t.client_identity.as_ref() {
+            builder = builder.identity(identity.clone());
+        }
+    }
     builder.build().map_err(Into::into)
+}
+
+/// Send-time transport overrides derived from a workspace's
+/// `WorkspaceSettings`, after secret hydration (PEM bytes, passphrase) has
+/// happened on the Rust side. Kept separate from `WorkspaceSettings` itself
+/// so (a) the engine never depends on DB/keychain types and stays
+/// unit-testable with pure inputs, and (b) the masked `WorkspaceSettings`
+/// columns can be serialized safely across IPC.
+#[derive(Debug, Clone, Default)]
+pub struct TransportOverrides {
+    pub proxy_url: Option<String>,
+    pub proxy_bypass: Option<String>,
+    pub client_identity: Option<reqwest::Identity>,
 }
 
 fn build_url(raw: &str, query: &[KeyValue]) -> AppResult<Url> {
@@ -365,7 +403,7 @@ mod tests {
             options: RequestOptions::default(),
             auth: AuthConfig::None,
         };
-        let resp = send(req, None).await.unwrap();
+        let resp = send(req, None, None).await.unwrap();
         server.join().unwrap();
 
         assert_eq!(resp.status, 201);
@@ -484,7 +522,7 @@ mod tests {
             options: RequestOptions::default(),
             auth: AuthConfig::Bearer { token: "test-token-123".into() },
         };
-        let resp = send(req, None).await.unwrap();
+        let resp = send(req, None, None).await.unwrap();
         assert_eq!(resp.status, 200);
         let body = decode(&resp);
         assert!(body.contains("\"authenticated\": true"));
@@ -503,7 +541,7 @@ mod tests {
             options: RequestOptions::default(),
             auth: AuthConfig::Basic { username: "restman".into(), password: "s3cr3t".into() },
         };
-        let resp = send(req, None).await.unwrap();
+        let resp = send(req, None, None).await.unwrap();
         assert_eq!(resp.status, 200);
         assert!(decode(&resp).contains("\"authenticated\": true"));
     }
@@ -520,7 +558,7 @@ mod tests {
             options: RequestOptions::default(),
             auth: AuthConfig::None,
         };
-        let resp = send(req, None).await.unwrap();
+        let resp = send(req, None, None).await.unwrap();
         assert_eq!(resp.status, 200);
         assert!(resp.size_bytes > 0);
         assert!(resp.timing.ttfb_ms.is_some());
@@ -539,7 +577,7 @@ mod tests {
             options: RequestOptions::default(),
             auth: AuthConfig::None,
         };
-        let resp = send(req, None).await.unwrap();
+        let resp = send(req, None, None).await.unwrap();
         assert_eq!(resp.status, 200);
         let body = decode(&resp);
         assert!(body.contains("restman"));

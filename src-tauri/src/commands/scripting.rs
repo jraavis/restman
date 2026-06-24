@@ -311,7 +311,11 @@ async fn run_one_request(
                 .collect(),
             env: resolved.values.clone(),
         };
-        match run_pre_script(&saved.pre_request_script, &ctx) {
+        let pre_script_src = saved.pre_request_script.clone();
+        match tokio::task::spawn_blocking(move || run_pre_script(&pre_script_src, &ctx))
+            .await
+            .map_err(|e| crate::error::AppError::Other(format!("pre-request script task panicked: {e}")))?
+        {
             Ok(r) => {
                 for (k, v) in &r.env_mutations {
                     resolved.values.insert(k.clone(), v.clone());
@@ -368,7 +372,7 @@ async fn run_one_request(
     };
 
     // Send.
-    let send_result = crate::engine::http::send(req.clone(), None).await;
+    let send_result = crate::engine::http::send(req.clone(), None, None).await;
 
     // Post-script.
     let post_result = match &send_result {
@@ -393,7 +397,11 @@ async fn run_one_request(
                 duration_ms: resp.timing.total_ms,
                 env: resolved.values.clone(),
             };
-            run_post_script(&saved.post_response_script, &ctx).ok()
+            let post_script_src = saved.post_response_script.clone();
+            tokio::task::spawn_blocking(move || run_post_script(&post_script_src, &ctx))
+                .await
+                .ok()
+                .and_then(|r| r.ok())
         }
         _ => None,
     };

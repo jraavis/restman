@@ -188,6 +188,19 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE oauth_tokens
         ADD COLUMN masked_preview TEXT;
     "#,
+    // v5 — per-workspace transport settings (proxy, default headers, mTLS
+    // client cert). One row per workspace; secrets (pasted PEM bytes +
+    // passphrase) live in the keychain and only their keychain slot names are
+    // reflected in `client_cert_json`. Same mask-on-write contract as auth.
+    r#"
+    CREATE TABLE workspace_settings (
+        workspace_id        TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+        proxy_url           TEXT,
+        proxy_bypass        TEXT,
+        default_headers_json TEXT NOT NULL DEFAULT '[]',
+        client_cert_json    TEXT NOT NULL DEFAULT '{"mode":"none"}'
+    );
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

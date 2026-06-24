@@ -9,6 +9,7 @@ pub mod requests;
 pub mod tabs;
 pub mod tags;
 pub mod variables;
+pub mod workspace_settings;
 pub mod workspaces;
 
 use reqwest_cookie_store::CookieStoreMutex;

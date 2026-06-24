@@ -10,6 +10,7 @@ mod secrets;
 mod store;
 mod util;
 mod vars;
+mod workspace;
 
 use std::sync::{Arc, Mutex};
 use store::AppState;
@@ -50,6 +51,8 @@ pub fn run() {
             commands::update_workspace,
             commands::delete_workspace,
             commands::set_active_workspace,
+            commands::get_workspace_settings,
+            commands::set_workspace_settings,
             commands::list_collections,
             commands::create_collection,
             commands::update_collection,

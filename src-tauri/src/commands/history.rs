@@ -43,7 +43,7 @@ pub async fn replay_history_entry(state: State<'_, AppState>, id: String) -> App
         let conn = state.db.lock().unwrap();
         history::get(&conn, &id)?
     };
-    let result = crate::engine::http::send(entry.request.clone(), Some(Arc::clone(&state.cookie_jar))).await;
+    let result = crate::engine::http::send(entry.request.clone(), Some(Arc::clone(&state.cookie_jar)), None).await;
     {
         let conn = state.db.lock().unwrap();
         match &result {
