@@ -43,3 +43,6 @@ csv = "1.3.1"
 saphyr = "0.0.6"
 rand = "0.9"
 
+[dev-dependencies]
+url = "2"
+
