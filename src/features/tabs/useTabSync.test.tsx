@@ -43,6 +43,8 @@ function makeSavedRequest(overrides: Partial<SavedRequest> = {}): SavedRequest {
     body: { mode: "none" },
     options: defaultRequest().options,
     auth: defaultRequestAuth(),
+    preRequestScript: "",
+    postResponseScript: "",
     tags: [],
     sortOrder: 0,
     createdAt: 0,

@@ -1,8 +1,11 @@
 mod auth;
+mod codegen;
 mod commands;
 mod engine;
 mod error;
+mod interop;
 mod model;
+mod scripting;
 mod secrets;
 mod store;
 mod util;
@@ -96,6 +99,15 @@ pub fn run() {
             commands::close_other_tabs,
             commands::close_all_tabs,
             commands::clear_cookies,
+            commands::run_collection_tests,
+            commands::get_oauth_token_preview,
+            commands::preview_import,
+            commands::apply_collection_import,
+            commands::export_collection,
+            commands::preview_environment_import,
+            commands::apply_environment_import,
+            commands::export_environment,
+            commands::generate_code,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

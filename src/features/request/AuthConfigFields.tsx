@@ -18,7 +18,11 @@ import type {
   OAuth2GrantType,
   PkceMethod,
 } from "../../lib/types";
-import { useOAuth2Status, useStartOAuth2Authorization } from "./oauthHooks";
+import {
+  useOAuth2Status,
+  useOAuthTokenPreview,
+  useStartOAuth2Authorization,
+} from "./oauthHooks";
 
 export const AUTH_TYPE_LABELS: Record<AuthType, string> = {
   none: "No Auth",
@@ -274,14 +278,25 @@ function OAuth2Connect({ scope }: { scope: AuthScope }) {
 
 function OAuth2StatusDisplay({ scope }: { scope: AuthScope }) {
   const { data: status } = useOAuth2Status(scope);
+  const { data: preview } = useOAuthTokenPreview(scope);
   if (!status?.connected) {
     return <p className="text-xs text-slate-400">Not connected.</p>;
   }
   return (
     <p className="text-xs text-emerald-600 dark:text-emerald-400">
       Connected
-      {status.expiresAt ? ` — expires ${new Date(status.expiresAt).toLocaleString()}` : ""}
+      {status.expiresAt
+        ? ` — expires ${new Date(status.expiresAt).toLocaleString()}`
+        : ""}
       {status.scope ? ` · ${status.scope}` : ""}
+      {preview ? (
+        <span
+          className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+          title="Masked token preview — raw value never leaves the backend"
+        >
+          {preview}
+        </span>
+      ) : null}
     </p>
   );
 }

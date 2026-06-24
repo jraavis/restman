@@ -13,6 +13,8 @@ export function useSaveRequest(workspaceId: string | undefined) {
   const title = useRequestStore((s) => s.title);
   const request = useRequestStore((s) => s.request);
   const auth = useRequestStore((s) => s.auth);
+  const preRequestScript = useRequestStore((s) => s.preRequestScript);
+  const postResponseScript = useRequestStore((s) => s.postResponseScript);
   const setRequestLink = useRequestStore((s) => s.setRequestLink);
 
   const createRequest = useCreateRequest(workspaceId);
@@ -39,6 +41,8 @@ export function useSaveRequest(workspaceId: string | undefined) {
       body: request.body,
       options: request.options,
       auth,
+      preRequestScript,
+      postResponseScript,
     };
 
     if (requestId) {

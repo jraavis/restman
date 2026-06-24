@@ -11,13 +11,15 @@ import { useCollections } from "../collections/hooks";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import { useResolvedVariableKeys } from "../environments/hooks";
 import { BodyEditor } from "./BodyEditor";
+import { CodeTab } from "./CodeTab";
 import { KeyValueEditor, type Pair } from "./KeyValueEditor";
 import { RequestAuthTab } from "./RequestAuthTab";
 import { SaveRequestDialog } from "./SaveRequestDialog";
+import { ScriptsTab } from "./ScriptsTab";
 import { useSaveRequest } from "./useSaveRequest";
 import { useSend } from "./useSend";
 
-type Tab = "params" | "headers" | "body" | "auth" | "options";
+type Tab = "params" | "headers" | "body" | "auth" | "scripts" | "options" | "code";
 
 export function RequestBuilder() {
   const request = useRequestStore((s) => s.request);
@@ -31,6 +33,10 @@ export function RequestBuilder() {
   const setOptions = useRequestStore((s) => s.setOptions);
   const auth = useRequestStore((s) => s.auth);
   const setAuth = useRequestStore((s) => s.setAuth);
+  const preRequestScript = useRequestStore((s) => s.preRequestScript);
+  const postResponseScript = useRequestStore((s) => s.postResponseScript);
+  const setPreRequestScript = useRequestStore((s) => s.setPreRequestScript);
+  const setPostResponseScript = useRequestStore((s) => s.setPostResponseScript);
   const { send, sending } = useSend();
 
   const { data: workspace } = useActiveWorkspace();
@@ -149,7 +155,7 @@ export function RequestBuilder() {
       )}
 
       <nav className="flex gap-1 border-t border-b border-slate-100 px-3 dark:border-slate-800">
-        {(["params", "headers", "body", "auth", "options"] as Tab[]).map((t) => (
+        {(["params", "headers", "body", "auth", "scripts", "code", "options"] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
@@ -172,7 +178,7 @@ export function RequestBuilder() {
         ))}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div className={`min-h-0 flex-1 ${tab === "scripts" || tab === "code" ? "overflow-hidden" : "overflow-auto p-3"}`}>
         {tab === "params" && (
           <KeyValueEditor
             rows={request.query}
@@ -193,6 +199,17 @@ export function RequestBuilder() {
         {tab === "body" && <BodyEditor body={request.body} onChange={setBody} variableKeys={variableKeys} />}
         {tab === "auth" && (
           <RequestAuthTab auth={auth} onChange={setAuth} collectionId={collectionId} requestId={requestId} />
+        )}
+        {tab === "scripts" && (
+          <ScriptsTab
+            preScript={preRequestScript}
+            postScript={postResponseScript}
+            onPreChange={setPreRequestScript}
+            onPostChange={setPostResponseScript}
+          />
+        )}
+        {tab === "code" && (
+          <CodeTab request={request} workspaceId={workspaceId} collectionId={collectionId} requestId={requestId} />
         )}
         {tab === "options" && (
           <div className="flex flex-col gap-4 text-sm">

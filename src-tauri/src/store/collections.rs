@@ -35,6 +35,17 @@ pub fn list(conn: &Connection, workspace_id: &str) -> AppResult<Vec<Collection>>
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// Direct children of `parent_id` (`None` = top-level) within `workspace_id`.
+/// Used by `interop::apply_import`/`collect` to walk the tree one level at
+/// a time without pulling the whole workspace.
+pub fn list_children(conn: &Connection, workspace_id: &str, parent_id: Option<&str>) -> AppResult<Vec<Collection>> {
+    let mut stmt = conn.prepare(&format!(
+        "{SELECT} WHERE workspace_id = ?1 AND parent_id IS ?2 ORDER BY sort_order ASC, created_at ASC"
+    ))?;
+    let rows = stmt.query_map(params![workspace_id, parent_id], row_to_collection)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub fn get(conn: &Connection, id: &str) -> AppResult<Collection> {
     conn.query_row(&format!("{SELECT} WHERE id = ?1"), params![id], row_to_collection)
         .map_err(|_| AppError::NotFound(format!("collection {id}")))
@@ -260,7 +271,8 @@ fn copy_children(conn: &Connection, from_id: &str, to_id: &str) -> AppResult<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{RequestAuth, SavedRequestInput};
+    use crate::model::auth::RequestAuth;
+    use crate::model::SavedRequestInput;
 
     fn sample_input(name: &str) -> SavedRequestInput {
         SavedRequestInput {
@@ -272,6 +284,8 @@ mod tests {
             body: Default::default(),
             options: Default::default(),
             auth: RequestAuth::default(),
+            pre_request_script: String::new(),
+            post_response_script: String::new(),
         }
     }
 

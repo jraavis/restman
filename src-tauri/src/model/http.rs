@@ -13,7 +13,7 @@ fn default_max_redirects() -> usize {
     10
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeaderEntry {
     pub name: String,
@@ -22,7 +22,7 @@ pub struct HeaderEntry {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyValue {
     pub key: String,
@@ -31,7 +31,7 @@ pub struct KeyValue {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FormField {
     pub key: String,
@@ -46,7 +46,7 @@ pub struct FormField {
 }
 
 /// Request body, tagged by `mode` with payload under `data`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(tag = "mode", content = "data", rename_all = "camelCase")]
 pub enum RequestBody {
     #[default]
@@ -69,7 +69,7 @@ pub enum RequestBody {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestOptions {
     #[serde(default = "default_timeout")]

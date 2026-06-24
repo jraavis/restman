@@ -173,6 +173,21 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_oauth_tokens_collection ON oauth_tokens(collection_id);
     CREATE INDEX idx_oauth_tokens_request ON oauth_tokens(request_id);
     "#,
+    // v4 — scripting. Pre/post scripts stored on requests; test results
+    // stored on history rows so the runner can show past pass/fail state.
+    // The oauth_tokens table gains a masked_preview column so the frontend
+    // can display a truncated token string without the raw value ever
+    // crossing IPC.
+    r#"
+    ALTER TABLE requests
+        ADD COLUMN pre_request_script  TEXT NOT NULL DEFAULT '';
+    ALTER TABLE requests
+        ADD COLUMN post_response_script TEXT NOT NULL DEFAULT '';
+    ALTER TABLE history
+        ADD COLUMN test_results_json TEXT;
+    ALTER TABLE oauth_tokens
+        ADD COLUMN masked_preview TEXT;
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

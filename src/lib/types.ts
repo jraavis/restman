@@ -116,6 +116,78 @@ export interface OAuth2Status {
   scope: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Scripting / test runner types
+// ---------------------------------------------------------------------------
+
+/** Outcome of a single `pm.test(name, fn)` call. */
+export interface TestResult {
+  name: string;
+  passed: boolean;
+  error: string | null;
+}
+
+/** Aggregate result from running a pre- or post-request script. */
+export interface ScriptResult {
+  tests: TestResult[];
+  error: string | null;
+  envMutations: [string, string][];
+  aborted: boolean;
+}
+
+/** The HTTP response plus any script outcomes — returned by `send_request`. */
+export interface SendResponse {
+  response: HttpResponse;
+  preScript: ScriptResult | null;
+  postScript: ScriptResult | null;
+}
+
+/** Per-request outcome in a collection run. */
+export interface RequestRunResult {
+  status: number | null;
+  durationMs: number;
+  passed: number;
+  failed: number;
+  tests: TestResult[];
+  error: string | null;
+}
+
+/** Emitted as `runner:progress` Tauri event during a collection run. */
+export interface RunnerProgress {
+  runId: string;
+  requestId: string;
+  requestName: string;
+  index: number;
+  total: number;
+  result: RequestRunResult | null;
+}
+
+/** Returned when a collection run completes. */
+export interface CollectionRunSummary {
+  runId: string;
+  totalRequests: number;
+  passedRequests: number;
+  failedRequests: number;
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  durationMs: number;
+  results: RequestRunResult[];
+  junitXml: string;
+}
+
+/** Options for `run_collection_tests`. */
+export interface CollectionRunOptions {
+  workspaceId: string;
+  collectionId: string;
+  data?: string | null;
+  iterations?: number;
+  /** Ignored when `parallel` is true. */
+  delayMs?: number;
+  /** Run each iteration's requests concurrently (waves of up to 5). */
+  parallel?: boolean;
+}
+
 export interface Collection {
   id: string;
   workspaceId: string;
@@ -146,6 +218,8 @@ export interface SavedRequest {
   body: RequestBody;
   options: RequestOptions;
   auth: RequestAuth;
+  preRequestScript: string;
+  postResponseScript: string;
   tags: Tag[];
   sortOrder: number;
   createdAt: number;
@@ -162,6 +236,8 @@ export interface SavedRequestInput {
   body: RequestBody;
   options: RequestOptions;
   auth: RequestAuth;
+  preRequestScript: string;
+  postResponseScript: string;
 }
 
 export interface SearchHit {
@@ -255,3 +331,121 @@ export interface Tab {
   createdAt: number;
   updatedAt: number;
 }
+
+// ---------------------------------------------------------------------------
+// Import / export (Phase 5) — mirrors `interop::{ImportedNode, ImportedRequest, ...}`
+// ---------------------------------------------------------------------------
+
+export interface ImportedRequest {
+  name: string;
+  method: string;
+  url: string;
+  headers: HeaderEntry[];
+  query: KeyValue[];
+  body: RequestBody;
+  options: RequestOptions;
+  auth: RequestAuth;
+  preRequestScript: string;
+  postResponseScript: string;
+}
+
+export interface ImportedNode {
+  name: string;
+  description: string | null;
+  auth: AuthConfig;
+  requests: ImportedRequest[];
+  children: ImportedNode[];
+}
+
+export type ImportFormat =
+  | "postman"
+  | "curl"
+  | "open_api"
+  | "har"
+  | "insomnia"
+  | "bruno"
+  | "http_file";
+export type ExportFormat = "postman" | "curl" | "open_api" | "har";
+
+export interface ImportStats {
+  folders: number;
+  requests: number;
+  warnings: number;
+}
+
+export interface ImportPreview {
+  root: ImportedNode;
+  warnings: string[];
+  stats: ImportStats;
+}
+
+export type ConflictMode = "skip" | "overwrite" | "merge";
+
+export interface ImportReport {
+  createdCollections: number;
+  createdRequests: number;
+  skipped: number;
+  overwritten: number;
+  warnings: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Environment import/export (Phase 5) — mirrors `interop::environment`
+// ---------------------------------------------------------------------------
+
+export interface ImportedVariable {
+  key: string;
+  value: string;
+  enabled: boolean;
+  isSecret: boolean;
+}
+
+export interface EnvironmentPreview {
+  name: string;
+  variables: ImportedVariable[];
+  warnings: string[];
+}
+
+export interface EnvironmentImportReport {
+  createdVariables: number;
+  overwritten: number;
+  warnings: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Code generation (Phase 5) — mirrors `codegen::{CodeLanguage, CodegenOptions}`
+// ---------------------------------------------------------------------------
+
+export type CodeLanguage =
+  | "curl"
+  | "javascript_fetch"
+  | "python"
+  | "go"
+  | "rust"
+  | "php"
+  | "java"
+  | "csharp"
+  | "ruby";
+
+export interface CodegenOptions {
+  includeAuth: boolean;
+  includeHeaders: boolean;
+}
+
+export function defaultCodegenOptions(): CodegenOptions {
+  return { includeAuth: true, includeHeaders: true };
+}
+
+/** Display label plus the Monaco language id used to syntax-highlight the
+ * generated snippet. */
+export const CODE_LANGUAGES: { value: CodeLanguage; label: string; monacoLanguage: string }[] = [
+  { value: "curl", label: "cURL", monacoLanguage: "shell" },
+  { value: "javascript_fetch", label: "JavaScript (fetch)", monacoLanguage: "javascript" },
+  { value: "python", label: "Python (requests)", monacoLanguage: "python" },
+  { value: "go", label: "Go (net/http)", monacoLanguage: "go" },
+  { value: "rust", label: "Rust (reqwest)", monacoLanguage: "rust" },
+  { value: "php", label: "PHP (Guzzle)", monacoLanguage: "php" },
+  { value: "java", label: "Java (OkHttp)", monacoLanguage: "java" },
+  { value: "csharp", label: "C# (HttpClient)", monacoLanguage: "csharp" },
+  { value: "ruby", label: "Ruby (Net::HTTP)", monacoLanguage: "ruby" },
+];

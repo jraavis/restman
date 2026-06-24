@@ -19,6 +19,12 @@ pub struct SavedRequest {
     #[serde(default)]
     pub auth: RequestAuth,
     pub tags: Vec<super::tag::Tag>,
+    /// JavaScript run before the request is sent. Empty string = no script.
+    #[serde(default)]
+    pub pre_request_script: String,
+    /// JavaScript run after the response arrives. Empty string = no script.
+    #[serde(default)]
+    pub post_response_script: String,
     pub sort_order: i64,
     pub created_at: i64,
     pub updated_at: i64,
@@ -42,4 +48,8 @@ pub struct SavedRequestInput {
     pub options: RequestOptions,
     #[serde(default)]
     pub auth: RequestAuth,
+    #[serde(default)]
+    pub pre_request_script: String,
+    #[serde(default)]
+    pub post_response_script: String,
 }

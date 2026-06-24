@@ -117,6 +117,8 @@ export function RequestList({
                   body: request.body,
                   options: request.options,
                   auth: request.auth,
+                  preRequestScript: request.preRequestScript,
+                  postResponseScript: request.postResponseScript,
                 },
               })
             }

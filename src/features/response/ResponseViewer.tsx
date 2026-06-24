@@ -24,9 +24,10 @@ import {
 import { statusColor, statusIconName } from "../../lib/methods";
 import type { HttpResponse } from "../../lib/http";
 import { useRequestStore } from "../../stores/requestStore";
+import { TestResultsPanel } from "./TestResultsPanel";
 
 type BodyView = "pretty" | "raw" | "preview" | "hex";
-type Tab = "body" | "headers" | "timing";
+type Tab = "body" | "headers" | "timing" | "tests";
 
 const STATUS_ICONS = {
   "check-circle-2": CheckCircle2,
@@ -38,6 +39,8 @@ const STATUS_ICONS = {
 
 export function ResponseViewer() {
   const response = useRequestStore((s) => s.response);
+  const preScript = useRequestStore((s) => s.preScript);
+  const postScript = useRequestStore((s) => s.postScript);
   const sending = useRequestStore((s) => s.sending);
   const error = useRequestStore((s) => s.error);
 
@@ -63,10 +66,18 @@ export function ResponseViewer() {
       </Centered>
     );
 
-  return <ResponseBody response={response} />;
+  return <ResponseBody response={response} preScript={preScript} postScript={postScript} />;
 }
 
-function ResponseBody({ response }: { response: HttpResponse }) {
+function ResponseBody({
+  response,
+  preScript,
+  postScript,
+}: {
+  response: HttpResponse;
+  preScript: import("../../lib/types").ScriptResult | null;
+  postScript: import("../../lib/types").ScriptResult | null;
+}) {
   const [tab, setTab] = useState<Tab>("body");
   const [view, setView] = useState<BodyView>("pretty");
   const [wrap, setWrap] = useState(true);
@@ -115,22 +126,44 @@ function ResponseBody({ response }: { response: HttpResponse }) {
 
       {/* tabs */}
       <nav className="flex gap-1 border-b border-slate-100 px-3 dark:border-slate-800">
-        {(["body", "headers", "timing"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={
-              "border-b-2 px-3 py-2 text-xs font-medium capitalize transition-colors " +
-              (tab === t
-                ? "border-accent text-accent"
-                : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200")
-            }
-          >
-            {t}
-            {t === "headers" ? ` (${response.headers.length})` : ""}
-          </button>
-        ))}
+        {(["body", "headers", "timing", "tests"] as Tab[]).map((t) => {
+          const hasTests =
+            (preScript?.tests.length ?? 0) > 0 ||
+            (postScript?.tests.length ?? 0) > 0 ||
+            !!preScript?.error ||
+            !!postScript?.error;
+          const failCount =
+            (preScript?.tests.filter((x) => !x.passed).length ?? 0) +
+            (postScript?.tests.filter((x) => !x.passed).length ?? 0);
+          return (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={
+                "border-b-2 px-3 py-2 text-xs font-medium capitalize transition-colors " +
+                (tab === t
+                  ? "border-accent text-accent"
+                  : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200")
+              }
+            >
+              {t}
+              {t === "headers" ? ` (${response.headers.length})` : ""}
+              {t === "tests" && hasTests ? (
+                <span
+                  className={
+                    "ml-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold " +
+                    (failCount > 0
+                      ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"
+                      : "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400")
+                  }
+                >
+                  {failCount > 0 ? `${failCount} fail` : "pass"}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </nav>
 
       <div className="min-h-0 flex-1 overflow-auto">
@@ -185,6 +218,10 @@ function ResponseBody({ response }: { response: HttpResponse }) {
         )}
 
         {tab === "timing" && <TimingView response={response} />}
+
+        {tab === "tests" && (
+          <TestResultsPanel preScript={preScript} postScript={postScript} />
+        )}
       </div>
     </div>
   );

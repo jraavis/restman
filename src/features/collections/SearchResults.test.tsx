@@ -29,6 +29,8 @@ function makeHit(id: string, tags: Tag[]): SearchHit {
     body: { mode: "none" },
     options: defaultRequest().options,
     auth: defaultRequestAuth(),
+    preRequestScript: "",
+    postResponseScript: "",
     tags,
     sortOrder: 0,
     createdAt: 0,

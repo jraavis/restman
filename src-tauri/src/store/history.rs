@@ -30,6 +30,7 @@ fn row_to_entry(r: &rusqlite::Row) -> rusqlite::Result<HistoryEntry> {
     })
 }
 
+/// Insert a history entry without test results (backward-compat wrapper).
 pub fn insert(
     conn: &Connection,
     workspace_id: &str,
@@ -39,6 +40,20 @@ pub fn insert(
     response: Option<&HttpResponse>,
     error: Option<&str>,
 ) -> AppResult<HistoryEntry> {
+    insert_with_tests(conn, workspace_id, request_id, name, request, response, error, None)
+}
+
+/// Insert a history entry, optionally including serialized test results.
+pub fn insert_with_tests(
+    conn: &Connection,
+    workspace_id: &str,
+    request_id: Option<&str>,
+    name: &str,
+    request: &HttpRequest,
+    response: Option<&HttpResponse>,
+    error: Option<&str>,
+    test_results_json: Option<&str>,
+) -> AppResult<HistoryEntry> {
     let id = Uuid::new_v4().to_string();
     let now = now_millis();
     let response_json = match response {
@@ -46,8 +61,8 @@ pub fn insert(
         None => None,
     };
     conn.execute(
-        "INSERT INTO history (id, workspace_id, request_id, name, method, url, status, duration_ms, request_json, response_json, error, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO history (id, workspace_id, request_id, name, method, url, status, duration_ms, request_json, response_json, error, test_results_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             id,
             workspace_id,
@@ -60,6 +75,7 @@ pub fn insert(
             serde_json::to_string(request)?,
             response_json,
             error,
+            test_results_json,
             now,
         ],
     )?;

@@ -5,14 +5,27 @@ import { invoke } from "@tauri-apps/api/core";
 import type { HttpRequest, HttpResponse } from "./http";
 import type {
   AuthConfig,
+  CodeLanguage,
+  CodegenOptions,
   Collection,
+  CollectionRunOptions,
+  CollectionRunSummary,
+  ConflictMode,
   Environment,
+  EnvironmentImportReport,
+  EnvironmentPreview,
+  ExportFormat,
   HistoryEntry,
   HistoryFilter,
+  ImportFormat,
+  ImportedNode,
+  ImportPreview,
+  ImportReport,
   OAuth2Status,
   SavedRequest,
   SavedRequestInput,
   SearchHit,
+  SendResponse,
   Tab,
   Tag,
   VarScope,
@@ -38,7 +51,7 @@ export interface SendRequestArgs {
 
 export const ipc = {
   ping: () => invoke<string>("ping"),
-  sendRequest: (args: SendRequestArgs) => invoke<HttpResponse>("send_request", { ...args }),
+  sendRequest: (args: SendRequestArgs) => invoke<SendResponse>("send_request", { ...args }),
 
   // Workspaces
   listWorkspaces: () => invoke<Workspace[]>("list_workspaces"),
@@ -84,6 +97,12 @@ export const ipc = {
     invoke<OAuth2Status>("start_oauth2_authorization", { collectionId: collectionId ?? null, requestId: requestId ?? null }),
   getOAuth2Status: (collectionId?: string | null, requestId?: string | null) =>
     invoke<OAuth2Status | null>("get_oauth2_status", { collectionId: collectionId ?? null, requestId: requestId ?? null }),
+  getOAuthTokenPreview: (collectionId?: string | null, requestId?: string | null) =>
+    invoke<string | null>("get_oauth_token_preview", { collectionId: collectionId ?? null, requestId: requestId ?? null }),
+
+  // Scripting / test runner
+  runCollectionTests: (options: CollectionRunOptions) =>
+    invoke<CollectionRunSummary>("run_collection_tests", { options }),
 
   // Tags
   listTags: (workspaceId: string) => invoke<Tag[]>("list_tags", { workspaceId }),
@@ -131,4 +150,44 @@ export const ipc = {
   closeOtherTabs: (workspaceId: string, keepId: string) =>
     invoke<void>("close_other_tabs", { workspaceId, keepId }),
   closeAllTabs: (workspaceId: string) => invoke<void>("close_all_tabs", { workspaceId }),
+
+  // Import / export
+  previewImport: (format: ImportFormat, content: string) =>
+    invoke<ImportPreview>("preview_import", { format, content }),
+  applyCollectionImport: (
+    workspaceId: string,
+    parentId: string | null,
+    root: ImportedNode,
+    mode: ConflictMode,
+  ) => invoke<ImportReport>("apply_collection_import", { workspaceId, parentId, root, mode }),
+  exportCollection: (collectionId: string, format: ExportFormat) =>
+    invoke<string>("export_collection", { collectionId, format }),
+
+  // Environment import / export
+  previewEnvironmentImport: (content: string) =>
+    invoke<EnvironmentPreview>("preview_environment_import", { content }),
+  applyEnvironmentImport: (
+    workspaceId: string,
+    collectionId: string | null,
+    preview: EnvironmentPreview,
+    overwriteExisting: boolean,
+  ) =>
+    invoke<EnvironmentImportReport>("apply_environment_import", {
+      workspaceId,
+      collectionId,
+      preview,
+      overwriteExisting,
+    }),
+  exportEnvironment: (environmentId: string) =>
+    invoke<string>("export_environment", { environmentId }),
+
+  // Code generation
+  generateCode: (
+    req: HttpRequest,
+    workspaceId: string,
+    collectionId: string | null,
+    requestId: string | null,
+    language: CodeLanguage,
+    options: CodegenOptions,
+  ) => invoke<string>("generate_code", { req, workspaceId, collectionId, requestId, language, options }),
 };

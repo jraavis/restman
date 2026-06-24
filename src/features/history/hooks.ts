@@ -91,7 +91,7 @@ export function useReplayIntoDraft(workspaceId: string | undefined) {
   const replay = useReplayHistoryEntry(workspaceId);
   const loadDraft = useRequestStore((s) => s.loadDraft);
   const beginSend = useRequestStore((s) => s.beginSend);
-  const setResponse = useRequestStore((s) => s.setResponse);
+  const setSendResponse = useRequestStore((s) => s.setSendResponse);
   const setError = useRequestStore((s) => s.setError);
 
   return useCallback(
@@ -100,11 +100,15 @@ export function useReplayIntoDraft(workspaceId: string | undefined) {
       beginSend();
       try {
         const response = await replay.mutateAsync(entry.id);
-        setResponse(response);
+        setSendResponse({
+          response,
+          preScript: null,
+          postScript: null,
+        });
       } catch (e) {
         setError(typeof e === "string" ? e : String(e));
       }
     },
-    [replay, loadDraft, beginSend, setResponse, setError],
+    [replay, loadDraft, beginSend, setSendResponse, setError],
   );
 }

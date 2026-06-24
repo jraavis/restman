@@ -34,11 +34,13 @@ fn row_to_request(r: &rusqlite::Row) -> rusqlite::Result<(SavedRequest, String)>
         created_at: r.get(10)?,
         updated_at: r.get(11)?,
         last_used_at: r.get(12)?,
+        pre_request_script: r.get::<_, Option<String>>(14)?.unwrap_or_default(),
+        post_response_script: r.get::<_, Option<String>>(15)?.unwrap_or_default(),
     };
     Ok((req, collection_id))
 }
 
-const SELECT: &str = "SELECT id, collection_id, name, method, headers_json, query_json, body_json, options_json, url, sort_order, created_at, updated_at, last_used_at, auth_json FROM requests";
+const SELECT: &str = "SELECT id, collection_id, name, method, headers_json, query_json, body_json, options_json, url, sort_order, created_at, updated_at, last_used_at, auth_json, pre_request_script, post_response_script FROM requests";
 
 fn attach_tags(conn: &Connection, req: &mut SavedRequest) -> AppResult<()> {
     let mut stmt = conn.prepare(
@@ -90,8 +92,8 @@ pub fn create(conn: &Connection, collection_id: &str, input: &SavedRequestInput)
     let owner = crate::auth::owner_key("request", &id);
     let auth = crate::auth::persist_request_auth(&owner, input.auth.clone())?;
     conn.execute(
-        "INSERT INTO requests (id, collection_id, name, method, url, headers_json, query_json, body_json, options_json, auth_json, sort_order, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+        "INSERT INTO requests (id, collection_id, name, method, url, headers_json, query_json, body_json, options_json, auth_json, pre_request_script, post_response_script, sort_order, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
         params![
             id,
             collection_id,
@@ -103,6 +105,8 @@ pub fn create(conn: &Connection, collection_id: &str, input: &SavedRequestInput)
             serde_json::to_string(&input.body)?,
             serde_json::to_string(&input.options)?,
             serde_json::to_string(&auth)?,
+            input.pre_request_script,
+            input.post_response_script,
             next_order,
             now,
         ],
@@ -114,7 +118,7 @@ pub fn update(conn: &Connection, id: &str, input: &SavedRequestInput) -> AppResu
     let owner = crate::auth::owner_key("request", id);
     let auth = crate::auth::persist_request_auth(&owner, input.auth.clone())?;
     let n = conn.execute(
-        "UPDATE requests SET name = ?2, method = ?3, url = ?4, headers_json = ?5, query_json = ?6, body_json = ?7, options_json = ?8, auth_json = ?9, updated_at = ?10 WHERE id = ?1",
+        "UPDATE requests SET name = ?2, method = ?3, url = ?4, headers_json = ?5, query_json = ?6, body_json = ?7, options_json = ?8, auth_json = ?9, pre_request_script = ?10, post_response_script = ?11, updated_at = ?12 WHERE id = ?1",
         params![
             id,
             input.name,
@@ -125,6 +129,8 @@ pub fn update(conn: &Connection, id: &str, input: &SavedRequestInput) -> AppResu
             serde_json::to_string(&input.body)?,
             serde_json::to_string(&input.options)?,
             serde_json::to_string(&auth)?,
+            input.pre_request_script,
+            input.post_response_script,
             now_millis(),
         ],
     )?;
@@ -190,6 +196,8 @@ pub fn duplicate(conn: &Connection, id: &str, new_name: Option<&str>) -> AppResu
         body: original.body,
         options: original.options,
         auth,
+        pre_request_script: original.pre_request_script,
+        post_response_script: original.post_response_script,
     };
     create(conn, &original.collection_id, &input)
 }
@@ -286,6 +294,8 @@ mod tests {
             body: RequestBody::default(),
             options: RequestOptions::default(),
             auth: RequestAuth::default(),
+            pre_request_script: String::new(),
+            post_response_script: String::new(),
         }
     }
 

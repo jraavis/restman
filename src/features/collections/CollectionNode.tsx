@@ -4,11 +4,27 @@
 //! `RequestList` for why that's what makes the fetch lazy.
 
 import { useState, type DragEvent, type KeyboardEvent } from "react";
-import { ChevronDown, ChevronRight, Copy, FilePlus, FolderPlus, Lock, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Download,
+  FilePlus,
+  FolderPlus,
+  Lock,
+  MoreHorizontal,
+  Pencil,
+  Play,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { useDismissable } from "../../lib/useDismissable";
 import { defaultRequest } from "../../lib/http";
-import { defaultRequestAuth, type Collection } from "../../lib/types";
+import { ipc } from "../../lib/ipc";
+import { defaultRequestAuth, type Collection, type ExportFormat } from "../../lib/types";
 import { CollectionAuthDialog } from "./CollectionAuthDialog";
+import { CollectionRunner } from "./CollectionRunner";
+import { ImportDialog } from "./ImportDialog";
 import {
   useCreateCollection,
   useCreateRequest,
@@ -49,6 +65,8 @@ export function CollectionNode({
   const [creating, setCreating] = useState<"folder" | "request" | null>(null);
   const [draftName, setDraftName] = useState("");
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [runnerOpen, setRunnerOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const menuRef = useDismissable<HTMLDivElement>(() => setMenuOpen(false));
 
   const createCollection = useCreateCollection(workspaceId);
@@ -92,7 +110,13 @@ export function CollectionNode({
     }
     const saved = await createRequest.mutateAsync({
       collectionId: collection.id,
-      input: { name: trimmed, ...defaultRequest(), auth: defaultRequestAuth() },
+      input: {
+        name: trimmed,
+        ...defaultRequest(),
+        auth: defaultRequestAuth(),
+        preRequestScript: "",
+        postResponseScript: "",
+      },
     });
     open(saved);
   }
@@ -105,6 +129,19 @@ export function CollectionNode({
   function handleDragStart(e: DragEvent) {
     e.stopPropagation();
     dragRef.current = { kind: "collection", id: collection.id, parentId: collection.parentId };
+  }
+
+  async function exportAs(format: ExportFormat) {
+    const content = await ipc.exportCollection(collection.id, format);
+    const base = collection.name.replace(/\s+/g, "_");
+    const { filename, mime } = exportArtifactMeta(format, base);
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // A request dropped here moves into this collection. A collection dropped
@@ -235,6 +272,66 @@ export function CollectionNode({
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
+                  setRunnerOpen(true);
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Play size={12} /> Run collection…
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setImportOpen(true);
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Upload size={12} /> Import here…
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void exportAs("postman");
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Download size={12} /> Export to Postman…
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void exportAs("open_api");
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Download size={12} /> Export to OpenAPI 3.0…
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void exportAs("har");
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Download size={12} /> Export to HAR…
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void exportAs("curl");
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Download size={12} /> Export to cURL…
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
                   if (
                     window.confirm(
                       `Delete "${collection.name}" and everything inside it? This can't be undone.`,
@@ -291,6 +388,47 @@ export function CollectionNode({
           onClose={() => setAuthDialogOpen(false)}
         />
       )}
+
+      {importOpen && workspaceId && (
+        <ImportDialog
+          workspaceId={workspaceId}
+          parentId={collection.id}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
+
+      {runnerOpen && workspaceId && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        >
+          <div className="h-[70vh] w-[640px] max-w-[95vw] overflow-hidden rounded-xl border border-slate-200 shadow-2xl dark:border-slate-700">
+            <CollectionRunner
+              workspaceId={workspaceId}
+              collectionId={collection.id}
+              collectionName={collection.name}
+              onClose={() => setRunnerOpen(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+/** Filename + MIME type for a collection-export artifact, per format. Kept
+ * here (next to the only caller) rather than in `lib/` because there's no
+ * second consumer yet — the codegen download in `CodeTab` already carries
+ * its own per-language extension table. */
+function exportArtifactMeta(format: ExportFormat, baseName: string): { filename: string; mime: string } {
+  switch (format) {
+    case "postman":
+      return { filename: `${baseName}.postman_collection.json`, mime: "application/json" };
+    case "open_api":
+      return { filename: `${baseName}.openapi.json`, mime: "application/json" };
+    case "har":
+      return { filename: `${baseName}.har`, mime: "application/json" };
+    case "curl":
+      return { filename: `${baseName}.sh`, mime: "text/plain" };
+  }
 }

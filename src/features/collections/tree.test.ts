@@ -29,6 +29,8 @@ function makeRequest(overrides: Partial<SavedRequest> = {}): SavedRequest {
     body: { mode: "none" } as SavedRequest["body"],
     options: {} as SavedRequest["options"],
     auth: defaultRequestAuth(),
+    preRequestScript: "",
+    postResponseScript: "",
     tags: [],
     sortOrder: 0,
     createdAt: 0,

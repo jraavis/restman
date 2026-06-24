@@ -20,6 +20,9 @@ pub enum AppError {
     #[error("not found: {0}")]
     NotFound(String),
 
+    #[error("script error: {0}")]
+    Script(String),
+
     #[error("{0}")]
     Other(String),
 }

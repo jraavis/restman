@@ -72,6 +72,7 @@ pub fn persist(owner: &str, config: AuthConfig) -> AppResult<AuthConfig> {
         secrets::set(&slot_key(owner, slot), &value)?;
         config = config.with_secret_field(slot, SECRET_MASK.to_string());
     }
+    debug_assert!(config.is_masked(), "persist must never return an unmasked secret");
     Ok(config)
 }
 
@@ -205,5 +206,35 @@ mod tests {
         let (owner, resolved) = resolve(Some(("col-1", collection_cfg.clone())), RequestAuth::Inherit, "req-1");
         assert_eq!(owner, owner_key("collection", "col-1"));
         assert_eq!(resolved, collection_cfg);
+    }
+
+    /// Regression guard for the mask-on-write contract every secret-bearing
+    /// `AuthConfig` variant must honor (see module doc): whatever `persist`
+    /// hands back must be safe to store in `auth_json` / cross IPC, i.e.
+    /// `is_masked()`, for every variant with secret fields — not just Bearer.
+    #[test]
+    fn persist_output_is_always_masked_for_every_variant() {
+        let owner = owner_key("request", "req-masked");
+        let variants = [
+            AuthConfig::None,
+            AuthConfig::Bearer { token: "tok".into() },
+            AuthConfig::Basic { username: "u".into(), password: "pw".into() },
+            AuthConfig::ApiKey { key: "X-Key".into(), value: "v".into(), location: ApiKeyLocation::Header },
+            AuthConfig::OAuth2(crate::model::auth::OAuth2Config {
+                client_secret: "cs".into(),
+                password: "pw".into(),
+                refresh_token: "rt".into(),
+                ..Default::default()
+            }),
+            AuthConfig::AwsSigV4(crate::model::auth::AwsSigV4Config {
+                secret_key: "sk".into(),
+                session_token: "st".into(),
+                ..Default::default()
+            }),
+        ];
+        for cfg in variants {
+            let masked = persist(&owner, cfg).unwrap();
+            assert!(masked.is_masked(), "{masked:?} not masked after persist");
+        }
     }
 }

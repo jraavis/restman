@@ -54,6 +54,8 @@ export function useTabSync(workspaceId: string | undefined) {
       title: activeTab.title,
       draft: activeTab.draft,
       auth: linkedRequest?.auth ?? defaultRequestAuth(),
+      preRequestScript: linkedRequest?.preRequestScript ?? "",
+      postResponseScript: linkedRequest?.postResponseScript ?? "",
     });
   }, [activeTab, storeActiveTabId, linkedRequest, loadTab]);
 

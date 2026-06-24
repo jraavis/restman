@@ -96,6 +96,45 @@ pub fn get_oauth2_status(state: State<AppState>, collection_id: Option<String>, 
     Ok(cached.map(|t| OAuth2Status { connected: true, expires_at: t.expires_at, scope: t.scope }))
 }
 
+/// Returns a server-side masked preview string (e.g. `tok-ab…xy9`) for the
+/// cached access token belonging to this collection/request's OAuth2 config.
+/// The raw token never crosses IPC — only the masked version does.
+/// Returns `None` if no token is cached or the config isn't OAuth2.
+#[tauri::command]
+pub fn get_oauth_token_preview(
+    state: State<AppState>,
+    collection_id: Option<String>,
+    request_id: Option<String>,
+) -> AppResult<Option<String>> {
+    let (owner, hydrated) = resolve_owner_and_config(
+        &state,
+        collection_id.as_deref(),
+        request_id.as_deref(),
+    )?;
+    if !matches!(hydrated, AuthConfig::OAuth2(_)) {
+        return Ok(None);
+    }
+    let conn = state.db.lock().unwrap();
+    let cached = token_store::get(&conn, &owner)?;
+    Ok(cached.map(|t| mask_token_preview(&t.access_token)))
+}
+
+/// Compute a short masked preview of a token.
+/// Takes up to 4 chars from each end, separated by `…`.
+/// E.g. "eyJhbGciOiJSUzI1NiJ9.abc.xyz" → "eyJh….xyz"
+fn mask_token_preview(token: &str) -> String {
+    const HEAD: usize = 4;
+    const TAIL: usize = 3;
+    if token.len() <= HEAD + TAIL + 1 {
+        // Token is short enough that no useful masking is possible; still
+        // don't return raw — return all-stars.
+        return "****".into();
+    }
+    let head = &token[..HEAD];
+    let tail = &token[token.len() - TAIL..];
+    format!("{head}\u{2026}{tail}")
+}
+
 /// Reads just the request line off the one-shot callback connection, replies
 /// with a small human-readable page, and hands the line to
 /// `oauth::parse_callback_request_line`. Doesn't bother draining the rest of

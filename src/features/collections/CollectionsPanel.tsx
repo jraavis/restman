@@ -3,13 +3,14 @@
 //! it. Replaces the old "Coming in Phase 2." placeholder in `Sidebar`.
 
 import { useRef, useState, type KeyboardEvent } from "react";
-import { ArrowDownUp, FolderPlus, Loader2, Search } from "lucide-react";
+import { ArrowDownUp, FolderPlus, Loader2, Search, Upload } from "lucide-react";
 import { HTTP_METHODS } from "../../lib/methods";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import { useCollections, useCreateCollection, useMoveCollection, useTags } from "./hooks";
 import { childrenOf, type SortMode } from "./tree";
 import type { DragItem } from "./dragState";
 import { CollectionNode } from "./CollectionNode";
+import { ImportDialog } from "./ImportDialog";
 import { SearchResults } from "./SearchResults";
 
 export function CollectionsPanel() {
@@ -27,6 +28,7 @@ export function CollectionsPanel() {
   const [methodFilter, setMethodFilter] = useState("any");
   const [tagFilter, setTagFilter] = useState("any");
   const [sortMode, setSortMode] = useState<SortMode>("manual");
+  const [importOpen, setImportOpen] = useState(false);
   const dragRef = useRef<DragItem | null>(null);
   // A method/tag filter alone (no typed query) is also "searching" — the
   // filter dropdowns below must work without first typing a search term.
@@ -84,6 +86,14 @@ export function CollectionsPanel() {
               <option value="used">Last used</option>
             </select>
           </div>
+          <button
+            type="button"
+            title="Import collection"
+            onClick={() => setImportOpen(true)}
+            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+          >
+            <Upload size={14} />
+          </button>
           <button
             type="button"
             title="New collection"
@@ -192,6 +202,10 @@ export function CollectionsPanel() {
             />
           ))}
         </div>
+      )}
+
+      {importOpen && workspaceId && (
+        <ImportDialog workspaceId={workspaceId} parentId={null} onClose={() => setImportOpen(false)} />
       )}
     </div>
   );

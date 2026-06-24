@@ -5,7 +5,7 @@
 //! creation, with no reassignment path.
 
 import { useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronRight, Circle, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Circle, Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import { useCollections } from "../collections/hooks";
 import {
@@ -17,6 +17,8 @@ import {
   useUpdateEnvironment,
 } from "./hooks";
 import { VariablesEditor } from "./VariablesEditor";
+import { ImportDialog } from "../collections/ImportDialog";
+import { ipc } from "../../lib/ipc";
 import type { Collection, Environment } from "../../lib/types";
 
 export function EnvironmentsPanel() {
@@ -33,6 +35,18 @@ export function EnvironmentsPanel() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [globalOpen, setGlobalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+
+  async function exportEnvironment(env: Environment) {
+    const content = await ipc.exportEnvironment(env.id);
+    const blob = new Blob([content], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${env.name.replace(/\s+/g, "_")}.postman_environment.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   const groups = new Map<string | null, Environment[]>();
   for (const env of environments ?? []) {
@@ -45,14 +59,24 @@ export function EnvironmentsPanel() {
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-slate-100 px-2 py-1.5 dark:border-slate-800">
         <span className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Environments</span>
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          title="New environment"
-          className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700"
-        >
-          <Plus size={14} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            title="Import environment"
+            className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700"
+          >
+            <Upload size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            title="New environment"
+            className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
@@ -98,6 +122,7 @@ export function EnvironmentsPanel() {
                 onToggleExpand={() => setExpandedId(expandedId === env.id ? null : env.id)}
                 onSetActive={() => setActiveEnvironment.mutate(env.id === active?.id ? null : env.id)}
                 onSave={(name, groupName) => updateEnvironment.mutate({ id: env.id, name, groupName })}
+                onExport={() => void exportEnvironment(env)}
                 onDelete={() => {
                   if (window.confirm(`Delete "${env.name}"? This can't be undone.`)) {
                     deleteEnvironment.mutate(env.id);
@@ -108,6 +133,15 @@ export function EnvironmentsPanel() {
           </div>
         ))}
       </div>
+
+      {importOpen && workspaceId && (
+        <ImportDialog
+          workspaceId={workspaceId}
+          parentId={null}
+          defaultKind="environment"
+          onClose={() => setImportOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -151,6 +185,7 @@ function EnvironmentRow({
   onToggleExpand,
   onSetActive,
   onSave,
+  onExport,
   onDelete,
 }: {
   env: Environment;
@@ -159,6 +194,7 @@ function EnvironmentRow({
   onToggleExpand: () => void;
   onSetActive: () => void;
   onSave: (name: string, groupName: string | null) => void;
+  onExport: () => void;
   onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -246,6 +282,14 @@ function EnvironmentRow({
           </span>
         )}
         <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
+          <button
+            type="button"
+            onClick={onExport}
+            title="Export environment"
+            className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700"
+          >
+            <Download size={12} />
+          </button>
           <button
             type="button"
             onClick={startEditing}

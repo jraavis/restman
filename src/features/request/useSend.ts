@@ -14,7 +14,7 @@ export function useSend() {
   const collectionId = useRequestStore((s) => s.collectionId);
   const title = useRequestStore((s) => s.title);
   const beginSend = useRequestStore((s) => s.beginSend);
-  const setResponse = useRequestStore((s) => s.setResponse);
+  const setSendResponse = useRequestStore((s) => s.setSendResponse);
   const setError = useRequestStore((s) => s.setError);
   const { data: workspace } = useActiveWorkspace();
   const invalidateHistory = useHistoryInvalidation();
@@ -30,20 +30,20 @@ export function useSend() {
     }
     beginSend();
     try {
-      const response = await ipc.sendRequest({
+      const result = await ipc.sendRequest({
         req: request,
         workspaceId: workspace.id,
         collectionId,
         requestId,
         name: title,
       });
-      setResponse(response);
+      setSendResponse(result);
     } catch (e) {
       setError(typeof e === "string" ? e : String(e));
     } finally {
       invalidateHistory(workspace.id);
     }
-  }, [request, workspace, collectionId, requestId, title, beginSend, setResponse, setError, invalidateHistory]);
+  }, [request, workspace, collectionId, requestId, title, beginSend, setSendResponse, setError, invalidateHistory]);
 
   return { send, sending };
 }
