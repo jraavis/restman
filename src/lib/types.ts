@@ -492,3 +492,19 @@ export const CODE_LANGUAGES: { value: CodeLanguage; label: string; monacoLanguag
   { value: "csharp", label: "C# (HttpClient)", monacoLanguage: "csharp" },
   { value: "ruby", label: "Ruby (Net::HTTP)", monacoLanguage: "ruby" },
 ];
+
+// ---------------------------------------------------------------------------
+// Cookie jar (Phase 6) — mirrors `model::http::CookieEntry`
+// ---------------------------------------------------------------------------
+
+export interface CookieEntry {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: string | null;
+  /** Unix seconds. `null` means a session cookie. */
+  expiresAt: number | null;
+}

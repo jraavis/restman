@@ -132,6 +132,22 @@ pub struct Timing {
     pub download_ms: Option<f64>,
 }
 
+/// A single cookie from the shared jar, surfaced read-only for the cookie
+/// viewer UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CookieEntry {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+    pub secure: bool,
+    pub http_only: bool,
+    pub same_site: Option<String>,
+    /// Unix seconds. `None` means a session cookie (cleared when the app closes).
+    pub expires_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpResponse {

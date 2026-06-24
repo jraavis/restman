@@ -102,12 +102,20 @@ Landed between Phase 5 and Phase 6, on top of `2c08819`:
 - **Not yet live-browser-verified** — same caveat as task 1: code review + automated tests only, dialog not yet clicked through in the running app.
 - **Follow-up flagged, not fixed here** (non-blocking per code review): switching/clearing a client-cert mode doesn't sweep the old keychain slots (e.g. Paste → None leaves the old cert/key/pass entries orphaned in the keychain rather than deleting them). `delete_cert_secrets` already exists and would cover it.
 
+### Phase 6, task 3 of 5 — Cookie jar visualization UI ✅ complete
+
+- **Backend**: `cookie_store` added as a direct dependency (`src-tauri/Cargo.toml`) — was previously only transitive via `reqwest_cookie_store`, but matching on `cookie_store::CookieExpiration`'s variants requires naming the type, which needs a direct dependency edge (the resolved version is unchanged, already locked to 0.22.1). New `CookieEntry` DTO (`src-tauri/src/model/http.rs`) and two commands next to the existing `clear_cookies` (`src-tauri/src/commands/http.rs`): `list_cookies` (iterates `iter_unexpired()`, sorted by domain then name; `expiresAt` is `Option<i64>` unix seconds, `None` for session cookies) and `delete_cookie` (thin wrapper over `CookieStore::remove(domain, path, name)`). Both registered in `lib.rs`.
+- **Frontend**: `CookieEntry` TS mirror (`src/lib/types.ts`); `listCookies`/`deleteCookie`/`clearCookies` IPC wrappers (`src/lib/ipc.ts` — `clearCookies` had no frontend wrapper at all until now, despite the Rust command existing since the Interlude). New `src/features/cookies/` module: `hooks.ts` (`useCookies`/`useDeleteCookie`/`useClearCookies`) and `CookieJarDialog.tsx` (same modal shell as `WorkspaceSettingsDialog`; per-row delete on hover, "Clear all" with `window.confirm`, empty state, Secure/HttpOnly/SameSite badges, session-vs-expiry display). Cookie values are shown in full, not masked — this is a read-only diagnostic view of data the backend already sends over the wire in plaintext, same posture as response headers/body in `ResponseViewer`, not a user-entered secret field.
+- **Entry point — deliberately not the workspace overflow menu.** The cookie jar (`AppState.cookie_jar`) is a single app-global `Arc<CookieStoreMutex>`, not workspace-scoped (unlike task 2's workspace settings), so it gets its own icon in `TopBar.tsx`'s global right-side icon cluster (next to the appearance-settings gear), not a workspace-menu item — putting it there would have falsely implied per-workspace cookies.
+- **Verification**: `cargo test` → 211 passed / 0 failed (no new Rust tests — these commands are one-line wrappers with no separable logic, same precedent as `clear_cookies` itself having none). `npx vitest run` → 105 passed / 18 files (+6 for `CookieJarDialog.test.tsx`). `npx tsc --noEmit` clean. `cargo clippy --lib --quiet` → still 13 warnings, all pre-existing, none in any file this task touched.
+- **Not yet live-browser-verified** — same caveat as tasks 1 and 2.
+
 ## Next
 
 **Phase 6** — confirmed with the user, in progress. Candidate scope:
 - ~~Response body pretty-print / JSON viewer / content-type-aware rendering, response filtering, save response to file.~~ ✅ done, see above.
 - ~~Per-workspace settings UI (proxy, default headers, client cert).~~ ✅ done, see above.
-- Request/response cookie visualization (cookie jar is already shared in the backend; surface it).
+- ~~Request/response cookie visualization (cookie jar is already shared in the backend; surface it).~~ ✅ done, see above.
 - gRPC / WebSocket / SSE streaming client.
 - Plugin system for custom codegen / custom import formats.
 
@@ -115,4 +123,4 @@ Landed between Phase 5 and Phase 6, on top of `2c08819`:
 
 1. Read this file first.
 2. `git log --oneline` to confirm the above hashes still match (this file will drift if more commits land without an update).
-3. Run `cargo test` and `npx vitest run` locally to confirm tests are green before continuing Phase 6. Expect 211 Rust tests / 99 frontend tests baseline.
+3. Run `cargo test` and `npx vitest run` locally to confirm tests are green before continuing Phase 6. Expect 211 Rust tests / 105 frontend tests baseline.

@@ -11,6 +11,7 @@ import type {
   CollectionRunOptions,
   CollectionRunSummary,
   ConflictMode,
+  CookieEntry,
   Environment,
   EnvironmentImportReport,
   EnvironmentPreview,
@@ -189,6 +190,12 @@ export const ipc = {
   // Files
   writeFileBytes: (path: string, contentBase64: string) =>
     invoke<void>("write_file_bytes", { path, contentBase64 }),
+
+  // Cookies
+  listCookies: () => invoke<CookieEntry[]>("list_cookies"),
+  deleteCookie: (domain: string, path: string, name: string) =>
+    invoke<void>("delete_cookie", { domain, path, name }),
+  clearCookies: () => invoke<void>("clear_cookies"),
 
   // Code generation
   generateCode: (

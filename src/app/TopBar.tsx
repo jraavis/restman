@@ -3,7 +3,7 @@
 //! settings.
 
 import { useState } from "react";
-import { ChevronDown, MoreHorizontal, PanelLeft, Pencil, Plus, Settings, Settings2, Trash2, Zap } from "lucide-react";
+import { ChevronDown, Cookie, MoreHorizontal, PanelLeft, Pencil, Plus, Settings, Settings2, Trash2, Zap } from "lucide-react";
 import {
   useActiveWorkspace,
   useCreateWorkspace,
@@ -13,6 +13,7 @@ import {
   useWorkspaces,
 } from "../features/workspaces/hooks";
 import { WorkspaceSettingsDialog } from "../features/workspaces/WorkspaceSettingsDialog";
+import { CookieJarDialog } from "../features/cookies/CookieJarDialog";
 import { EnvironmentSwitcher } from "../features/environments/EnvironmentSwitcher";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { useDismissable } from "../lib/useDismissable";
@@ -27,6 +28,7 @@ export function TopBar() {
   const deleteWs = useDeleteWorkspace();
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cookiesOpen, setCookiesOpen] = useState(false);
   const [wsSettingsOpen, setWsSettingsOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -165,6 +167,14 @@ export function TopBar() {
         <EnvironmentSwitcher workspaceId={active?.id} />
         <button
           type="button"
+          onClick={() => setCookiesOpen(true)}
+          title="Cookies"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <Cookie size={16} />
+        </button>
+        <button
+          type="button"
           onClick={() => setSettingsOpen((o) => !o)}
           title="Appearance settings"
           aria-expanded={settingsOpen}
@@ -180,6 +190,7 @@ export function TopBar() {
       </div>
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {cookiesOpen && <CookieJarDialog onClose={() => setCookiesOpen(false)} />}
       {wsSettingsOpen && active && (
         <WorkspaceSettingsDialog
           workspaceId={active.id}

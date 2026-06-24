@@ -103,6 +103,8 @@ pub fn run() {
             commands::close_other_tabs,
             commands::close_all_tabs,
             commands::clear_cookies,
+            commands::list_cookies,
+            commands::delete_cookie,
             commands::run_collection_tests,
             commands::get_oauth_token_preview,
             commands::preview_import,

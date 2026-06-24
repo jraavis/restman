@@ -4027,6 +4027,7 @@ dependencies = [
  "aws-credential-types",
  "aws-sigv4",
  "base64 0.22.1",
+ "cookie_store",
  "csv",
  "jsonpath-rust",
  "jsonschema",

@@ -2,7 +2,7 @@ use crate::auth;
 use crate::auth::oauth::{self, token_store};
 use crate::error::AppResult;
 use crate::model::auth::{AuthConfig, OAuth2Config, RequestAuth};
-use crate::model::http::{HttpRequest, HttpResponse};
+use crate::model::http::{CookieEntry, HttpRequest, HttpResponse};
 use crate::scripting::{
     run_post_script, run_pre_script, PostScriptContext, PreScriptContext, ScriptResult,
 };
@@ -288,5 +288,44 @@ pub fn clear_cookies(state: State<'_, AppState>) -> AppResult<()> {
         .lock()
         .map_err(|e| crate::error::AppError::Other(format!("cookie jar lock poisoned: {e}")))?
         .clear();
+    Ok(())
+}
+
+/// List all unexpired cookies currently held in the shared jar, sorted by
+/// domain then name for stable display.
+#[tauri::command]
+pub fn list_cookies(state: State<'_, AppState>) -> AppResult<Vec<CookieEntry>> {
+    let jar = state
+        .cookie_jar
+        .lock()
+        .map_err(|e| crate::error::AppError::Other(format!("cookie jar lock poisoned: {e}")))?;
+    let mut cookies: Vec<CookieEntry> = jar
+        .iter_unexpired()
+        .map(|c| CookieEntry {
+            name: c.name().to_string(),
+            value: c.value().to_string(),
+            domain: String::from(&c.domain),
+            path: String::from(&c.path),
+            secure: c.secure().unwrap_or(false),
+            http_only: c.http_only().unwrap_or(false),
+            same_site: c.same_site().map(|s| s.to_string()),
+            expires_at: match c.expires {
+                cookie_store::CookieExpiration::AtUtc(t) => Some(t.unix_timestamp()),
+                cookie_store::CookieExpiration::SessionEnd => None,
+            },
+        })
+        .collect();
+    cookies.sort_by(|a, b| (&a.domain, &a.name).cmp(&(&b.domain, &b.name)));
+    Ok(cookies)
+}
+
+/// Remove a single cookie identified by its domain/path/name triple.
+#[tauri::command]
+pub fn delete_cookie(state: State<'_, AppState>, domain: String, path: String, name: String) -> AppResult<()> {
+    state
+        .cookie_jar
+        .lock()
+        .map_err(|e| crate::error::AppError::Other(format!("cookie jar lock poisoned: {e}")))?
+        .remove(&domain, &path, &name);
     Ok(())
 }
