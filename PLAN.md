@@ -74,17 +74,36 @@ The first push to GitHub included `Co-Authored-By: Claude` trailers on the Phase
 - **Frontend wiring**: widened `ImportFormat`/`ExportFormat` TS unions (postman/curl/open_api/har/insomnia/bruno/http_file); `ipc.ts` wrappers for all new commands; `ImportDialog.tsx` format-aware placeholders/`accept`/blurbs; `CollectionNode.tsx` OpenAPI+HAR export menu items.
 - **Verification**: `cargo test` → 193 passed / 0 failed (was 175 pre-Phase-5; +18 across HAR/Insomnia/Bruno/`.http`/environment). `npx tsc --noEmit` clean. `npx vitest run` → 71 passed / 14 files (was 68; +3 for OpenAPI-format selection + environment preview/apply). `cargo build` warning-free. Rust/cargo tests must be run locally (Rust/cargo not in this sandbox); the `@rolldown/binding-darwin-arm64` native binary requirement from Phase 4 persists.
 
+## Interlude — Hardening & workspace transport settings ✅ complete
+
+Landed between Phase 5 and Phase 6, on top of `2c08819`:
+
+- **Per-workspace transport settings (backend)**: migration v5 adds `workspace_settings` (proxy_url, proxy_bypass, default_headers_json, client_cert_json). New `engine::http::TransportOverrides` struct (proxy + optional `reqwest::Identity` for mTLS), kept decoupled from DB/keychain types so the engine stays pure/unit-testable. `crate::workspace::resolve_transport` hydrates real secret bytes from the masked `WorkspaceSettings` just before send; `apply_default_headers` fills header gaps without overriding user-set headers. Pasted client-cert PEM goes to the OS keychain, never the DB row (mask-on-write contract, same as every other secret). `get_workspace_settings`/`set_workspace_settings` IPC commands exist. **No frontend UI yet** — tracked as a Phase 6 item below.
+- **Scripting hardening**: the Phase 4 "8s execution timeout" line above was aspirational until this pass — `scripting::engine::apply_runtime_limits` now actually installs a QuickJS interrupt handler (8s deadline) plus a 512KB max stack size, called from both `run_pre_script` and `run_post_script`. `$randomInt` switched from a deterministic `ts % 1001` derivation to real `rand::rng().random_range(..)`. Pre/post script execution moved to `tokio::task::spawn_blocking` so synchronous QuickJS work can't block the async executor.
+- **Frontend**: `sendCookies` toggle added to `RequestBuilder` — the shared-cookie-jar capability (`RequestOptions::send_cookies`) existed Rust-side since earlier but was never exposed in the UI.
+- Commits: `f3df973`, `ab35d67`, `46d3549`, `a44b55b`.
+- **Verification**: `cargo test` → 207 passed / 0 failed. `npx vitest run` → 71 passed. `npx tsc --noEmit` clean. `cargo clippy --lib --quiet` was claimed as "only 3 pre-existing warnings" here, but that was never re-checked after this Interlude's own commits — actual count at the time was already 12 (corrected below, found during Phase 6 task #14 verification).
+
+## Phase 6 — Response viewer upgrade ✅ complete (task 1 of 5)
+
+- **Content-type-aware rendering**: `contentTypeOf`/`monacoLanguageFor`/`extensionFor` (`src/lib/http.ts`) read the response's `Content-Type` header (stripped of `; charset=…`) and map it to a Monaco language id and a save-file extension. Both Pretty and Raw views now use this instead of a hardcoded `json`/`plaintext` choice.
+- **XML pretty-printing**: `prettyXml` (`src/lib/encoding.ts`) — `DOMParser`-based, 2-space indent, returns `null` on parse failure (mirrors `prettyJson`'s contract) so the Pretty view falls back to JSON, then XML, then raw text with content-type-derived highlighting.
+- **Response filtering**: `filterJsonValue` (recursive, key-or-value substring match, per-field pruning — a matching key keeps only its own subtree, not sibling fields) and `filterLines` (substring line filter with a no-match placeholder), both in `src/lib/encoding.ts`. Wired to a filter input shown next to the Pretty/Raw/Preview/Hex toggle (hidden for Preview/Hex, where filtering doesn't apply).
+- **Save to file**: new `tauri-plugin-dialog` (native save picker, JS side) + `write_file_bytes` Rust command (`src-tauri/src/commands/files.rs`, base64-decode then `std::fs::write`). Chosen over reusing the existing `CollectionNode.tsx` Blob-anchor-download convention because that convention is itself a violation of this repo's "Rust owns all file I/O" contract (`PLAN.md` line 3, `ipc.ts` header) — converging `CollectionNode` onto the same Rust path is a good follow-up, not done here.
+- **Verification**: `cargo test` → 209 passed / 0 failed (+2 for `write_file_bytes`). `npx vitest run` → 94 passed / 17 files (+23: XML/filter helpers, `contentTypeOf`/`monacoLanguageFor`/`extensionFor`). `npx tsc --noEmit` clean. `cargo clippy --lib --quiet` → 12 pre-existing warnings, all in files untouched by this task (`model/auth.rs` ×4, `interop/{bruno,har,http_file}.rs`, `commands/{http,scripting}.rs`, `store/{collections,history}.rs`, `model/workspace_settings.rs`); zero new warnings introduced. Also fixed in passing: an unused `WorkspaceSettings` import this Interlude's own cleanup had mis-removed from `workspace.rs` (it's used by `#[cfg(test)]`, invisible to `cargo check --lib` but breaks `cargo test`) and an unused-variable warning on the same test module's `t` binding.
+- **Not yet live-browser-verified** — no dev server run yet this task; `npx tsc`/`vitest`/`cargo test` all green but the save-dialog flow and the new filter UI have not been clicked through in the actual app.
+
 ## Next
 
-**Phase 6** is next. Candidate scope (to be confirmed with the user before starting):
-- Response body pretty-print / JSON viewer / content-type-aware rendering, response filtering, save response to file.
+**Phase 6** — confirmed with the user, in progress. Candidate scope:
+- ~~Response body pretty-print / JSON viewer / content-type-aware rendering, response filtering, save response to file.~~ ✅ done, see above.
 - Request/response cookie visualization (cookie jar is already shared in the backend; surface it).
 - gRPC / WebSocket / SSE streaming client.
-- Per-workspace settings (proxy, default headers, client cert).
+- Per-workspace settings **UI** (proxy, default headers, client cert) — backend already done, see Interlude above; only the frontend panel remains.
 - Plugin system for custom codegen / custom import formats.
 
 ## How to resume in a new session
 
 1. Read this file first.
 2. `git log --oneline` to confirm the above hashes still match (this file will drift if more commits land without an update).
-3. Run `cargo test` and `npx vitest run` locally to confirm Phase 5 tests are green before starting Phase 6. Expect 193 Rust tests / 71 frontend tests baseline.
+3. Run `cargo test` and `npx vitest run` locally to confirm tests are green before continuing Phase 6. Expect 209 Rust tests / 94 frontend tests baseline.

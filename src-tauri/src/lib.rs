@@ -20,6 +20,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // App-local data dir holds the single SQLite database.
             let dir = app.path().app_data_dir()?;
@@ -111,6 +112,7 @@ pub fn run() {
             commands::apply_environment_import,
             commands::export_environment,
             commands::generate_code,
+            commands::write_file_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

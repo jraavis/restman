@@ -1,6 +1,7 @@
 //! Response viewer: status line, body (Pretty/Raw/Preview/Hex), headers, timing.
 
 import { useMemo, useState, type ReactNode } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   AlertCircle,
   AlertTriangle,
@@ -10,19 +11,24 @@ import {
   Download,
   HelpCircle,
   Loader2,
+  Search,
   XCircle,
 } from "lucide-react";
 import { LazyCodeEditor } from "../../components/LazyCodeEditor";
 import {
   base64ToBytes,
   bytesToText,
+  filterJsonValue,
+  filterLines,
   formatBytes,
   formatHex,
   formatMs,
   prettyJson,
+  prettyXml,
 } from "../../lib/encoding";
 import { statusColor, statusIconName } from "../../lib/methods";
-import type { HttpResponse } from "../../lib/http";
+import { contentTypeOf, extensionFor, monacoLanguageFor, type HttpResponse } from "../../lib/http";
+import { ipc } from "../../lib/ipc";
 import { useRequestStore } from "../../stores/requestStore";
 import { TestResultsPanel } from "./TestResultsPanel";
 
@@ -81,21 +87,42 @@ function ResponseBody({
   const [tab, setTab] = useState<Tab>("body");
   const [view, setView] = useState<BodyView>("pretty");
   const [wrap, setWrap] = useState(true);
+  const [filter, setFilter] = useState("");
 
   const bytes = useMemo(() => base64ToBytes(response.bodyBase64), [response.bodyBase64]);
   const text = useMemo(() => bytesToText(bytes), [bytes]);
-  const pretty = useMemo(() => prettyJson(text), [text]);
+  const contentType = useMemo(() => contentTypeOf(response.headers), [response.headers]);
+  const prettyJsonText = useMemo(() => prettyJson(text), [text]);
+  const prettyXmlText = useMemo(() => (prettyJsonText ? null : prettyXml(text)), [text, prettyJsonText]);
+  const pretty = prettyJsonText ?? prettyXmlText;
+  const prettyLang = prettyJsonText ? "json" : prettyXmlText ? "xml" : monacoLanguageFor(contentType);
+  const rawLang = monacoLanguageFor(contentType);
+
+  const filteredPretty = useMemo(() => {
+    const base = pretty ?? text;
+    if (!filter.trim()) return base;
+    if (prettyJsonText) {
+      try {
+        return JSON.stringify(filterJsonValue(JSON.parse(text), filter) ?? {}, null, 2);
+      } catch {
+        // fall through to line filter
+      }
+    }
+    return filterLines(base, filter);
+  }, [pretty, text, filter, prettyJsonText]);
+  const filteredRaw = useMemo(() => filterLines(text, filter), [text, filter]);
+
   const StatusIcon = STATUS_ICONS[statusIconName(response.status)];
 
   const copy = () => void navigator.clipboard.writeText(text);
-  const download = () => {
-    const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "response";
-    a.click();
-    URL.revokeObjectURL(url);
+  const download = async () => {
+    const path = await save({ defaultPath: `response.${extensionFor(contentType)}` });
+    if (!path) return;
+    try {
+      await ipc.writeFileBytes(path, response.bodyBase64);
+    } catch (e) {
+      console.error("failed to save response body:", e);
+    }
   };
 
   return (
@@ -187,6 +214,17 @@ function ResponseBody({
                   </button>
                 ))}
               </div>
+              {(view === "pretty" || view === "raw") && (
+                <div className="ml-2 flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 dark:border-slate-700">
+                  <Search size={12} className="text-slate-400" />
+                  <input
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                    placeholder="Filter body…"
+                    className="w-32 bg-transparent text-xs outline-none placeholder:text-slate-400 dark:text-slate-200"
+                  />
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => setWrap((w) => !w)}
@@ -197,7 +235,16 @@ function ResponseBody({
               </button>
             </div>
             <div className="min-h-0 flex-1">
-              <BodyContent view={view} text={text} pretty={pretty} bytes={bytes} wrap={wrap} />
+              <BodyContent
+                view={view}
+                previewText={text}
+                prettyText={filteredPretty}
+                prettyLang={prettyLang}
+                rawText={filteredRaw}
+                rawLang={rawLang}
+                bytes={bytes}
+                wrap={wrap}
+              />
             </div>
           </div>
         )}
@@ -250,14 +297,20 @@ function IconButton({
 
 function BodyContent({
   view,
-  text,
-  pretty,
+  previewText,
+  prettyText,
+  prettyLang,
+  rawText,
+  rawLang,
   bytes,
   wrap,
 }: {
   view: BodyView;
-  text: string;
-  pretty: string | null;
+  previewText: string;
+  prettyText: string;
+  prettyLang: string;
+  rawText: string;
+  rawLang: string;
   bytes: Uint8Array;
   wrap: boolean;
 }) {
@@ -269,22 +322,15 @@ function BodyContent({
   };
 
   if (view === "pretty")
-    return (
-      <LazyCodeEditor
-        language={pretty ? "json" : "plaintext"}
-        value={pretty ?? text}
-        options={opts}
-        height="100%"
-      />
-    );
+    return <LazyCodeEditor language={prettyLang} value={prettyText} options={opts} height="100%" />;
   if (view === "raw")
-    return <LazyCodeEditor language="plaintext" value={text} options={opts} height="100%" />;
+    return <LazyCodeEditor language={rawLang} value={rawText} options={opts} height="100%" />;
   if (view === "preview")
     return (
       <iframe
         title="preview"
         sandbox=""
-        srcDoc={text}
+        srcDoc={previewText}
         className="h-full w-full border-0 bg-white"
       />
     );

@@ -73,6 +73,38 @@ export interface HttpResponse {
   httpVersion: string;
 }
 
+/** The `Content-Type` header value (mime type only, no `; charset=…`), or
+ * null if the response didn't send one. */
+export function contentTypeOf(headers: HeaderEntry[]): string | null {
+  const h = headers.find((x) => x.name.toLowerCase() === "content-type");
+  if (!h) return null;
+  return h.value.split(";")[0]?.trim().toLowerCase() || null;
+}
+
+/** Map a mime type to a Monaco editor language id for syntax highlighting. */
+export function monacoLanguageFor(contentType: string | null): string {
+  if (!contentType) return "plaintext";
+  if (contentType.includes("json")) return "json";
+  if (contentType.includes("xml")) return "xml";
+  if (contentType.includes("html")) return "html";
+  if (contentType.includes("css")) return "css";
+  if (contentType.includes("javascript") || contentType.includes("ecmascript")) return "javascript";
+  return "plaintext";
+}
+
+/** Filename extension to suggest when saving a response body to disk. */
+export function extensionFor(contentType: string | null): string {
+  if (!contentType) return "txt";
+  if (contentType.includes("json")) return "json";
+  if (contentType.includes("xml")) return "xml";
+  if (contentType.includes("html")) return "html";
+  if (contentType.includes("css")) return "css";
+  if (contentType.includes("javascript")) return "js";
+  if (contentType.includes("csv")) return "csv";
+  if (contentType.startsWith("image/")) return contentType.split("/")[1] ?? "bin";
+  return "txt";
+}
+
 export function defaultRequest(): HttpRequest {
   return {
     method: "GET",

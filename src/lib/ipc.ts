@@ -181,6 +181,10 @@ export const ipc = {
   exportEnvironment: (environmentId: string) =>
     invoke<string>("export_environment", { environmentId }),
 
+  // Files
+  writeFileBytes: (path: string, contentBase64: string) =>
+    invoke<void>("write_file_bytes", { path, contentBase64 }),
+
   // Code generation
   generateCode: (
     req: HttpRequest,

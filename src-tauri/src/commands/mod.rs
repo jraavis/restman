@@ -4,6 +4,7 @@
 pub mod codegen;
 pub mod collections;
 pub mod environments;
+pub mod files;
 pub mod history;
 pub mod http;
 pub mod interop;
@@ -18,6 +19,7 @@ pub mod workspaces;
 pub use codegen::*;
 pub use collections::*;
 pub use environments::*;
+pub use files::*;
 pub use history::*;
 pub use http::*;
 pub use interop::*;
