@@ -7,12 +7,12 @@ import type { SseEvent } from "../../lib/types";
 import { SsePanel } from "./SsePanel";
 
 vi.mock("../../lib/ipc", () => ({
-  ipc: { sseConnect: vi.fn(), sseDisconnect: vi.fn() },
+  ipc: { sseConnect: vi.fn(), streamDisconnect: vi.fn() },
 }));
 
 beforeEach(() => {
   vi.mocked(ipc.sseConnect).mockReset();
-  vi.mocked(ipc.sseDisconnect).mockReset();
+  vi.mocked(ipc.streamDisconnect).mockReset();
 });
 
 function typeUrl(url: string) {
@@ -86,7 +86,7 @@ describe("SsePanel", () => {
       onEvent({ type: "open" });
       return "conn-1";
     });
-    vi.mocked(ipc.sseDisconnect).mockResolvedValue(undefined);
+    vi.mocked(ipc.streamDisconnect).mockResolvedValue(undefined);
     render(<SsePanel workspaceId="ws1" onClose={() => {}} />);
 
     typeUrl("https://api.example.com/events");
@@ -95,7 +95,7 @@ describe("SsePanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
 
-    expect(ipc.sseDisconnect).toHaveBeenCalledWith("conn-1");
+    expect(ipc.streamDisconnect).toHaveBeenCalledWith("conn-1");
     expect(await screen.findByText("Closed")).toBeInTheDocument();
   });
 });

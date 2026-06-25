@@ -96,6 +96,27 @@ pub(crate) fn build_client(
     cookie_jar: Option<Arc<CookieStoreMutex>>,
     transport: Option<&TransportOverrides>,
 ) -> AppResult<Client> {
+    build_client_inner(opts, cookie_jar, transport, false)
+}
+
+/// Same as `build_client`, pinned to HTTP/1.1. The WebSocket handshake
+/// (`engine::ws::connect`) speaks the RFC 6455 `Upgrade:` header dance, which
+/// HTTP/2 has no concept of (RFC 7540 §8.1.2.2 has h2 strip `Upgrade` outright)
+/// — if ALPN picked h2 on a `wss://` connection the server would just answer
+/// the GET normally and the handshake would never see its 101.
+pub(crate) fn build_ws_client(
+    opts: &RequestOptions,
+    transport: Option<&TransportOverrides>,
+) -> AppResult<Client> {
+    build_client_inner(opts, None, transport, true)
+}
+
+fn build_client_inner(
+    opts: &RequestOptions,
+    cookie_jar: Option<Arc<CookieStoreMutex>>,
+    transport: Option<&TransportOverrides>,
+    http1_only: bool,
+) -> AppResult<Client> {
     let redirect = if opts.follow_redirects {
         reqwest::redirect::Policy::limited(opts.max_redirects)
     } else {
@@ -105,6 +126,9 @@ pub(crate) fn build_client(
         .danger_accept_invalid_certs(!opts.verify_ssl)
         .redirect(redirect)
         .timeout(Duration::from_secs(opts.timeout_secs));
+    if http1_only {
+        builder = builder.http1_only();
+    }
     if opts.send_cookies {
         if let Some(jar) = cookie_jar {
             builder = builder.cookie_provider(jar);
