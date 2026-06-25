@@ -3,7 +3,7 @@
 //! settings.
 
 import { useState } from "react";
-import { ChevronDown, Cookie, MoreHorizontal, PanelLeft, Pencil, Plus, Radio, Settings, Settings2, Trash2, Zap } from "lucide-react";
+import { Cable, ChevronDown, Cookie, MoreHorizontal, PanelLeft, Pencil, Plus, Radio, Settings, Settings2, Trash2, Zap } from "lucide-react";
 import {
   useActiveWorkspace,
   useCreateWorkspace,
@@ -15,6 +15,7 @@ import {
 import { WorkspaceSettingsDialog } from "../features/workspaces/WorkspaceSettingsDialog";
 import { CookieJarDialog } from "../features/cookies/CookieJarDialog";
 import { SsePanel } from "../features/streaming/SsePanel";
+import { WsPanel } from "../features/streaming/WsPanel";
 import { EnvironmentSwitcher } from "../features/environments/EnvironmentSwitcher";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { useDismissable } from "../lib/useDismissable";
@@ -31,6 +32,7 @@ export function TopBar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cookiesOpen, setCookiesOpen] = useState(false);
   const [streamingOpen, setStreamingOpen] = useState(false);
+  const [wsOpen, setWsOpen] = useState(false);
   const [wsSettingsOpen, setWsSettingsOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -186,6 +188,15 @@ export function TopBar() {
         </button>
         <button
           type="button"
+          disabled={!active}
+          onClick={() => setWsOpen(true)}
+          title="WebSocket"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <Cable size={16} />
+        </button>
+        <button
+          type="button"
           onClick={() => setSettingsOpen((o) => !o)}
           title="Appearance settings"
           aria-expanded={settingsOpen}
@@ -204,6 +215,9 @@ export function TopBar() {
       {cookiesOpen && <CookieJarDialog onClose={() => setCookiesOpen(false)} />}
       {streamingOpen && active && (
         <SsePanel workspaceId={active.id} onClose={() => setStreamingOpen(false)} />
+      )}
+      {wsOpen && active && (
+        <WsPanel workspaceId={active.id} onClose={() => setWsOpen(false)} />
       )}
       {wsSettingsOpen && active && (
         <WorkspaceSettingsDialog

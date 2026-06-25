@@ -16,7 +16,19 @@ use reqwest_cookie_store::CookieStoreMutex;
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+/// A live streaming connection's handle, keyed by connection id in
+/// `AppState::streams`. Every protocol gets `task` (abort on disconnect);
+/// only protocols that support sending after connect (WebSocket; gRPC
+/// client/bidi streaming later) populate `sender`. SSE is receive-only, so
+/// its entries always have `sender: None`.
+pub struct StreamHandle {
+    pub task: JoinHandle<()>,
+    pub sender: Option<UnboundedSender<WsMessage>>,
+}
 
 /// Managed Tauri state holding the single SQLite connection and the
 /// shared cookie jar for cookie-based session auth.
@@ -33,7 +45,7 @@ pub struct AppState {
     pub cookie_jar: Arc<CookieStoreMutex>,
     /// Live streaming connections (SSE/WS/gRPC), keyed by a connection id
     /// generated at connect time. Each entry's task removes itself on natural
-    /// completion; `*_disconnect` commands remove-and-abort explicitly.
+    /// completion; `stream_disconnect` removes-and-aborts explicitly.
     /// `Arc` so the spawned task can self-remove without borrowing `AppState`.
-    pub streams: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
+    pub streams: Arc<Mutex<HashMap<String, StreamHandle>>>,
 }

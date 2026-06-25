@@ -34,6 +34,8 @@ import type {
   Variable,
   VariableInput,
   WorkspaceSettings,
+  WsEvent,
+  WsOutbound,
 } from "./types";
 
 export interface Workspace {
@@ -209,8 +211,24 @@ export const ipc = {
     channel.onmessage = onEvent;
     return invoke<string>("sse_connect", { channel, workspaceId, url, headers });
   },
-  sseDisconnect: (connectionId: string) =>
-    invoke<void>("sse_disconnect", { connectionId }),
+
+  // Streaming (WebSocket)
+  wsConnect: (
+    workspaceId: string,
+    url: string,
+    headers: HeaderEntry[],
+    onEvent: (event: WsEvent) => void,
+  ) => {
+    const channel = new Channel<WsEvent>();
+    channel.onmessage = onEvent;
+    return invoke<string>("ws_connect", { channel, workspaceId, url, headers });
+  },
+  wsSend: (connectionId: string, message: WsOutbound) =>
+    invoke<void>("ws_send", { connectionId, message }),
+
+  // Disconnect any live stream (SSE/WS/gRPC) — one generic backend command.
+  streamDisconnect: (connectionId: string) =>
+    invoke<void>("stream_disconnect", { connectionId }),
 
   // Code generation
   generateCode: (

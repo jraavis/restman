@@ -23,7 +23,7 @@ export function useSseConnection() {
 
   const disconnect = useCallback(() => {
     if (connectionIdRef.current) {
-      void ipc.sseDisconnect(connectionIdRef.current);
+      void ipc.streamDisconnect(connectionIdRef.current);
       connectionIdRef.current = null;
     }
     setStatus("closed");
@@ -33,13 +33,13 @@ export function useSseConnection() {
   // connection. Reads the ref at unmount time, not a stale closure value.
   useEffect(() => {
     return () => {
-      if (connectionIdRef.current) void ipc.sseDisconnect(connectionIdRef.current);
+      if (connectionIdRef.current) void ipc.streamDisconnect(connectionIdRef.current);
     };
   }, []);
 
   const connect = useCallback(async (workspaceId: string, url: string, headers: HeaderEntry[]) => {
     if (connectionIdRef.current) {
-      void ipc.sseDisconnect(connectionIdRef.current);
+      void ipc.streamDisconnect(connectionIdRef.current);
       connectionIdRef.current = null;
     }
     setStatus("connecting");

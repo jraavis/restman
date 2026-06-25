@@ -519,3 +519,23 @@ export type SseEvent =
   | { type: "message"; event: string | null; data: string; id: string | null }
   | { type: "error"; message: string }
   | { type: "closed" };
+
+// ---------------------------------------------------------------------------
+// Streaming (Phase 6, #17b) — mirrors `model::streaming::WsEvent`/`WsOutbound`
+// ---------------------------------------------------------------------------
+
+/**
+ * Tagged by `type` — matches serde's `tag = "type"` on `WsEvent`. Binary
+ * frames carry base64 in `data` with `binary: true`.
+ */
+export type WsEvent =
+  | { type: "open" }
+  | { type: "message"; binary: boolean; data: string }
+  | { type: "closed"; code: number | null; reason: string | null }
+  | { type: "error"; message: string };
+
+/** Outbound WS frame; `data` is text verbatim or base64 when `binary`. */
+export interface WsOutbound {
+  binary: boolean;
+  data: string;
+}

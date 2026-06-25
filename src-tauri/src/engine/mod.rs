@@ -1,5 +1,6 @@
 //! Network engine. HTTP client (reqwest) lives here; SSE landed in Phase 6
-//! task #17a. WebSocket/gRPC land in later #17 sub-phases.
+//! task #17a, WebSocket in #17b. gRPC lands in later #17 sub-phases.
 
 pub mod http;
 pub mod sse;
+pub mod ws;
