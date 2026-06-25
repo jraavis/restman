@@ -508,3 +508,14 @@ export interface CookieEntry {
   /** Unix seconds. `null` means a session cookie. */
   expiresAt: number | null;
 }
+
+// ---------------------------------------------------------------------------
+// Streaming (Phase 6, #17a) — mirrors `model::streaming::SseEvent`
+// ---------------------------------------------------------------------------
+
+/** Tagged by `type` — matches serde's `tag = "type"` on `SseEvent`. */
+export type SseEvent =
+  | { type: "open" }
+  | { type: "message"; event: string | null; data: string; id: string | null }
+  | { type: "error"; message: string }
+  | { type: "closed" };

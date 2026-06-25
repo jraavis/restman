@@ -1,8 +1,8 @@
 //! Typed wrappers around Tauri IPC commands. The frontend never touches the
 //! network or disk directly — every backend operation goes through here.
 
-import { invoke } from "@tauri-apps/api/core";
-import type { HttpRequest, HttpResponse } from "./http";
+import { Channel, invoke } from "@tauri-apps/api/core";
+import type { HeaderEntry, HttpRequest, HttpResponse } from "./http";
 import type {
   AuthConfig,
   CodeLanguage,
@@ -27,6 +27,7 @@ import type {
   SavedRequestInput,
   SearchHit,
   SendResponse,
+  SseEvent,
   Tab,
   Tag,
   VarScope,
@@ -196,6 +197,20 @@ export const ipc = {
   deleteCookie: (domain: string, path: string, name: string) =>
     invoke<void>("delete_cookie", { domain, path, name }),
   clearCookies: () => invoke<void>("clear_cookies"),
+
+  // Streaming (SSE)
+  sseConnect: (
+    workspaceId: string,
+    url: string,
+    headers: HeaderEntry[],
+    onEvent: (event: SseEvent) => void,
+  ) => {
+    const channel = new Channel<SseEvent>();
+    channel.onmessage = onEvent;
+    return invoke<string>("sse_connect", { channel, workspaceId, url, headers });
+  },
+  sseDisconnect: (connectionId: string) =>
+    invoke<void>("sse_disconnect", { connectionId }),
 
   // Code generation
   generateCode: (

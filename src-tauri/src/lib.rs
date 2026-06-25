@@ -38,6 +38,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(conn),
                 cookie_jar,
+                streams: Arc::new(Mutex::new(std::collections::HashMap::new())),
             });
             Ok(())
         })
@@ -105,6 +106,8 @@ pub fn run() {
             commands::clear_cookies,
             commands::list_cookies,
             commands::delete_cookie,
+            commands::sse_connect,
+            commands::sse_disconnect,
             commands::run_collection_tests,
             commands::get_oauth_token_preview,
             commands::preview_import,
