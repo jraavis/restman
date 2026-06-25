@@ -5,6 +5,7 @@
 //! creation, with no reassignment path.
 
 import { useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 import { Check, ChevronDown, ChevronRight, Circle, Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import { useCollections } from "../collections/hooks";
@@ -18,6 +19,7 @@ import {
 } from "./hooks";
 import { VariablesEditor } from "./VariablesEditor";
 import { ImportDialog } from "../collections/ImportDialog";
+import { textToBase64 } from "../../lib/encoding";
 import { ipc } from "../../lib/ipc";
 import type { Collection, Environment } from "../../lib/types";
 
@@ -39,13 +41,13 @@ export function EnvironmentsPanel() {
 
   async function exportEnvironment(env: Environment) {
     const content = await ipc.exportEnvironment(env.id);
-    const blob = new Blob([content], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${env.name.replace(/\s+/g, "_")}.postman_environment.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const path = await save({ defaultPath: `${env.name.replace(/\s+/g, "_")}.postman_environment.json` });
+    if (!path) return;
+    try {
+      await ipc.writeFileBytes(path, textToBase64(content));
+    } catch (e) {
+      console.error("failed to export environment:", e);
+    }
   }
 
   const groups = new Map<string | null, Environment[]>();
