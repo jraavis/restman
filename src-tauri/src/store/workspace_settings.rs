@@ -40,12 +40,42 @@ fn persist_secret_slot(slot: &str, value: &str) -> AppResult<String> {
     Ok(SECRET_MASK.to_string())
 }
 
+/// Which keychain slots a cert config variant actually owns. Drives the
+/// sweep in `persist_cert_secrets` — any slot *not* in this set gets
+/// deleted, mirroring how `auth::persist` (`src-tauri/src/auth/mod.rs`)
+/// sweeps `AuthConfig::secret_slots()` for any slot outside the live
+/// variant's `secret_fields()`.
+fn live_secret_slots(cert: &ClientCertConfig) -> Vec<&'static str> {
+    match cert {
+        ClientCertConfig::None => vec![],
+        ClientCertConfig::Paste { passphrase, .. } => {
+            let mut slots = vec!["cert", "key"];
+            if passphrase.is_some() {
+                slots.push("pass");
+            }
+            slots
+        }
+        ClientCertConfig::Path { passphrase, .. } => {
+            if passphrase.is_some() { vec!["pass"] } else { vec![] }
+        }
+    }
+}
+
 /// Mask pasted-PEM secrets before they're persisted: real bytes go to the
 /// keychain, the JSON row holds `SECRET_MASK` so re-reading on the frontend
 /// displays "set but masked" without exposing the value. Path mode stores
 /// only filesystem paths (no keychain use) except for the passphrase, which
 /// is a credential even though it unlocks a file rather than gating an API.
+/// Slots outside the new config's `live_secret_slots` are swept *first*, so
+/// switching away from Paste (to None or Path) doesn't leave the old
+/// cert/key/pass bytes orphaned in the OS keychain.
 fn persist_cert_secrets(workspace_id: &str, cert: &ClientCertConfig) -> AppResult<ClientCertConfig> {
+    let live = live_secret_slots(cert);
+    for slot in SLOTS {
+        if !live.contains(slot) {
+            secrets::delete(&keychain_slot(workspace_id, slot)).ok();
+        }
+    }
     Ok(match cert {
         ClientCertConfig::None => ClientCertConfig::None,
         ClientCertConfig::Paste { cert_pem, key_pem, passphrase } => {
@@ -53,20 +83,14 @@ fn persist_cert_secrets(workspace_id: &str, cert: &ClientCertConfig) -> AppResul
             let key_pem = persist_secret_slot(&keychain_slot(workspace_id, "key"), key_pem)?;
             let passphrase = match passphrase {
                 Some(p) => Some(persist_secret_slot(&keychain_slot(workspace_id, "pass"), p)?),
-                None => {
-                    secrets::delete(&keychain_slot(workspace_id, "pass")).ok();
-                    None
-                }
+                None => None,
             };
             ClientCertConfig::Paste { cert_pem, key_pem, passphrase }
         }
         ClientCertConfig::Path { cert_path, key_path, passphrase } => {
             let passphrase = match passphrase {
                 Some(p) => Some(persist_secret_slot(&keychain_slot(workspace_id, "pass"), p)?),
-                None => {
-                    secrets::delete(&keychain_slot(workspace_id, "pass")).ok();
-                    None
-                }
+                None => None,
             };
             ClientCertConfig::Path {
                 cert_path: cert_path.clone(),
@@ -258,6 +282,36 @@ mod tests {
         assert!(key.contains("BEGIN PRIVATE KEY"), "key was clobbered: {key:?}");
         let pass = secrets::get(&keychain_slot(&ws, "pass")).unwrap().unwrap();
         assert_eq!(pass, "hunter2", "passphrase was clobbered");
+    }
+
+    #[test]
+    fn switching_from_paste_to_none_sweeps_orphaned_keychain_slots() {
+        let conn = mem();
+        let ws = default_ws_id(&conn);
+        let pasted = WorkspaceSettings {
+            workspace_id: ws.clone(),
+            proxy_url: None,
+            proxy_bypass: None,
+            default_headers: Vec::new(),
+            client_cert: ClientCertConfig::Paste {
+                cert_pem: "-----BEGIN CERTIFICATE-----\nreal\n-----END CERTIFICATE-----\n".into(),
+                key_pem: "-----BEGIN PRIVATE KEY-----\nreal\n-----END PRIVATE KEY-----\n".into(),
+                passphrase: Some("hunter2".into()),
+            },
+        };
+        set(&conn, &pasted).unwrap();
+        // Sanity check: the keychain actually holds the pasted bytes before we
+        // switch away.
+        assert!(secrets::get(&keychain_slot(&ws, "cert")).unwrap().is_some());
+        assert!(secrets::get(&keychain_slot(&ws, "key")).unwrap().is_some());
+        assert!(secrets::get(&keychain_slot(&ws, "pass")).unwrap().is_some());
+
+        let cleared = WorkspaceSettings { client_cert: ClientCertConfig::None, ..pasted };
+        set(&conn, &cleared).unwrap();
+
+        assert!(secrets::get(&keychain_slot(&ws, "cert")).unwrap().is_none(), "cert slot orphaned");
+        assert!(secrets::get(&keychain_slot(&ws, "key")).unwrap().is_none(), "key slot orphaned");
+        assert!(secrets::get(&keychain_slot(&ws, "pass")).unwrap().is_none(), "pass slot orphaned");
     }
 
     #[test]
