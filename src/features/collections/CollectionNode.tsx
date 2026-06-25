@@ -4,6 +4,7 @@
 //! `RequestList` for why that's what makes the fetch lazy.
 
 import { useState, type DragEvent, type KeyboardEvent } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
   ChevronRight,
@@ -19,6 +20,7 @@ import {
   Upload,
 } from "lucide-react";
 import { useDismissable } from "../../lib/useDismissable";
+import { textToBase64 } from "../../lib/encoding";
 import { defaultRequest } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
 import { defaultRequestAuth, type Collection, type ExportFormat } from "../../lib/types";
@@ -134,14 +136,13 @@ export function CollectionNode({
   async function exportAs(format: ExportFormat) {
     const content = await ipc.exportCollection(collection.id, format);
     const base = collection.name.replace(/\s+/g, "_");
-    const { filename, mime } = exportArtifactMeta(format, base);
-    const blob = new Blob([content], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    const path = await save({ defaultPath: exportFilename(format, base) });
+    if (!path) return;
+    try {
+      await ipc.writeFileBytes(path, textToBase64(content));
+    } catch (e) {
+      console.error("failed to export collection:", e);
+    }
   }
 
   // A request dropped here moves into this collection. A collection dropped
@@ -416,19 +417,19 @@ export function CollectionNode({
   );
 }
 
-/** Filename + MIME type for a collection-export artifact, per format. Kept
- * here (next to the only caller) rather than in `lib/` because there's no
- * second consumer yet — the codegen download in `CodeTab` already carries
- * its own per-language extension table. */
-function exportArtifactMeta(format: ExportFormat, baseName: string): { filename: string; mime: string } {
+/** Filename for a collection-export artifact, per format. Kept here (next
+ * to the only caller) rather than in `lib/` because there's no second
+ * consumer yet — the codegen download in `CodeTab` already carries its own
+ * per-language extension table. */
+function exportFilename(format: ExportFormat, baseName: string): string {
   switch (format) {
     case "postman":
-      return { filename: `${baseName}.postman_collection.json`, mime: "application/json" };
+      return `${baseName}.postman_collection.json`;
     case "open_api":
-      return { filename: `${baseName}.openapi.json`, mime: "application/json" };
+      return `${baseName}.openapi.json`;
     case "har":
-      return { filename: `${baseName}.har`, mime: "application/json" };
+      return `${baseName}.har`;
     case "curl":
-      return { filename: `${baseName}.sh`, mime: "text/plain" };
+      return `${baseName}.sh`;
   }
 }

@@ -1,4 +1,5 @@
-//! Helpers for decoding the base64 response body the backend sends.
+//! Helpers for converting between text/bytes and the base64 the backend
+//! reads (file writes) and sends (response bodies).
 
 export function base64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
@@ -9,6 +10,14 @@ export function base64ToBytes(b64: string): Uint8Array {
 
 export function bytesToText(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
+/** UTF-8 safe encode for `ipc.writeFileBytes`, which expects base64. */
+export function textToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
 }
 
 /** Reformat JSON text with indentation; returns null if not valid JSON. */

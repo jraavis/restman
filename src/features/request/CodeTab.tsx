@@ -5,10 +5,12 @@
 //! way, so there's nothing extra to plumb in from the auth tab's local state.
 
 import { useState, type ReactNode } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 import { Copy, Download } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { LazyCodeEditor } from "../../components/LazyCodeEditor";
 import { Switch } from "../../components/Switch";
+import { textToBase64 } from "../../lib/encoding";
 import { ipc } from "../../lib/ipc";
 import type { HttpRequest } from "../../lib/http";
 import { CODE_LANGUAGES, defaultCodegenOptions, type CodeLanguage } from "../../lib/types";
@@ -50,14 +52,14 @@ export function CodeTab({
   const text = code ?? "";
 
   const copy = () => void navigator.clipboard.writeText(text);
-  const download = () => {
-    const blob = new Blob([text], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `request.${FILE_EXTENSIONS[language]}`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const download = async () => {
+    const path = await save({ defaultPath: `request.${FILE_EXTENSIONS[language]}` });
+    if (!path) return;
+    try {
+      await ipc.writeFileBytes(path, textToBase64(text));
+    } catch (e) {
+      console.error("failed to download code snippet:", e);
+    }
   };
 
   return (

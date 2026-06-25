@@ -14,6 +14,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
+import { textToBase64 } from "../../lib/encoding";
 import { ipc } from "../../lib/ipc";
 import type {
   CollectionRunOptions,
@@ -110,28 +112,26 @@ export function CollectionRunner({
     }
   }, [workspaceId, collectionId, iterations, delayMs, parallel, data]);
 
-  const exportJunit = useCallback(() => {
+  const exportJunit = useCallback(async () => {
     if (!summary) return;
-    const blob = new Blob([summary.junitXml], { type: "application/xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${collectionName.replace(/\s+/g, "_")}_junit.xml`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const path = await save({ defaultPath: `${collectionName.replace(/\s+/g, "_")}_junit.xml` });
+    if (!path) return;
+    try {
+      await ipc.writeFileBytes(path, textToBase64(summary.junitXml));
+    } catch (e) {
+      console.error("failed to export JUnit results:", e);
+    }
   }, [summary, collectionName]);
 
-  const exportJson = useCallback(() => {
+  const exportJson = useCallback(async () => {
     if (!summary) return;
-    const blob = new Blob([JSON.stringify(summary, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${collectionName.replace(/\s+/g, "_")}_results.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const path = await save({ defaultPath: `${collectionName.replace(/\s+/g, "_")}_results.json` });
+    if (!path) return;
+    try {
+      await ipc.writeFileBytes(path, textToBase64(JSON.stringify(summary, null, 2)));
+    } catch (e) {
+      console.error("failed to export JSON results:", e);
+    }
   }, [summary, collectionName]);
 
   return (

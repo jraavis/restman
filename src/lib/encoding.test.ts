@@ -8,12 +8,22 @@ import {
   formatHex,
   prettyJson,
   prettyXml,
+  textToBase64,
 } from "./encoding";
 
 describe("encoding", () => {
   it("decodes base64 to text", () => {
     const bytes = base64ToBytes(btoa("hello"));
     expect(bytesToText(bytes)).toBe("hello");
+  });
+
+  it("encodes text to base64", () => {
+    expect(textToBase64("hello")).toBe("aGVsbG8=");
+  });
+
+  it("round-trips non-ASCII text through textToBase64/base64ToBytes/bytesToText", () => {
+    const text = "héllo wörld 日本語";
+    expect(bytesToText(base64ToBytes(textToBase64(text)))).toBe(text);
   });
 
   it("pretty-prints valid JSON and rejects invalid", () => {
