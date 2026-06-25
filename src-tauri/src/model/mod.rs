@@ -7,6 +7,7 @@ pub mod environment;
 pub mod history;
 pub mod http;
 pub mod request;
+pub mod streaming;
 pub mod tab;
 pub mod tag;
 pub mod variable;

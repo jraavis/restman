@@ -91,7 +91,7 @@ pub async fn send(
     })
 }
 
-fn build_client(
+pub(crate) fn build_client(
     opts: &RequestOptions,
     cookie_jar: Option<Arc<CookieStoreMutex>>,
     transport: Option<&TransportOverrides>,

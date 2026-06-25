@@ -14,7 +14,9 @@ pub mod workspaces;
 
 use reqwest_cookie_store::CookieStoreMutex;
 use rusqlite::Connection;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::task::JoinHandle;
 
 /// Managed Tauri state holding the single SQLite connection and the
 /// shared cookie jar for cookie-based session auth.
@@ -29,4 +31,9 @@ pub struct AppState {
     /// Shared RFC 6265 cookie jar. Requests with `send_cookies: true` share
     /// this store — cookies set by one request are replayed on subsequent ones.
     pub cookie_jar: Arc<CookieStoreMutex>,
+    /// Live streaming connections (SSE/WS/gRPC), keyed by a connection id
+    /// generated at connect time. Each entry's task removes itself on natural
+    /// completion; `*_disconnect` commands remove-and-abort explicitly.
+    /// `Arc` so the spawned task can self-remove without borrowing `AppState`.
+    pub streams: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
 }

@@ -3,7 +3,7 @@
 //! settings.
 
 import { useState } from "react";
-import { ChevronDown, Cookie, MoreHorizontal, PanelLeft, Pencil, Plus, Settings, Settings2, Trash2, Zap } from "lucide-react";
+import { ChevronDown, Cookie, MoreHorizontal, PanelLeft, Pencil, Plus, Radio, Settings, Settings2, Trash2, Zap } from "lucide-react";
 import {
   useActiveWorkspace,
   useCreateWorkspace,
@@ -14,6 +14,7 @@ import {
 } from "../features/workspaces/hooks";
 import { WorkspaceSettingsDialog } from "../features/workspaces/WorkspaceSettingsDialog";
 import { CookieJarDialog } from "../features/cookies/CookieJarDialog";
+import { SsePanel } from "../features/streaming/SsePanel";
 import { EnvironmentSwitcher } from "../features/environments/EnvironmentSwitcher";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { useDismissable } from "../lib/useDismissable";
@@ -29,6 +30,7 @@ export function TopBar() {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cookiesOpen, setCookiesOpen] = useState(false);
+  const [streamingOpen, setStreamingOpen] = useState(false);
   const [wsSettingsOpen, setWsSettingsOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -175,6 +177,15 @@ export function TopBar() {
         </button>
         <button
           type="button"
+          disabled={!active}
+          onClick={() => setStreamingOpen(true)}
+          title="SSE streaming"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <Radio size={16} />
+        </button>
+        <button
+          type="button"
           onClick={() => setSettingsOpen((o) => !o)}
           title="Appearance settings"
           aria-expanded={settingsOpen}
@@ -191,6 +202,9 @@ export function TopBar() {
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {cookiesOpen && <CookieJarDialog onClose={() => setCookiesOpen(false)} />}
+      {streamingOpen && active && (
+        <SsePanel workspaceId={active.id} onClose={() => setStreamingOpen(false)} />
+      )}
       {wsSettingsOpen && active && (
         <WorkspaceSettingsDialog
           workspaceId={active.id}
