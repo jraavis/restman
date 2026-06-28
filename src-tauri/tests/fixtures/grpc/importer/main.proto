@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package spike.importer;
+
+import "common/shared.proto";
+
+message Wrapper {
+  spike.common.Shared inner = 1;
+}

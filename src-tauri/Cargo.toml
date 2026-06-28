@@ -46,5 +46,9 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["h
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [dev-dependencies]
+prost = "0.14.4"
+prost-reflect = "0.16.4"
+prost-types = "0.14.4"
+protox = "0.9.1"
 url = "2"
 
