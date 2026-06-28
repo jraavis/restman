@@ -26,7 +26,7 @@ serde_json = "1"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 thiserror = "2.0.18"
 uuid = { version = "1.23.3", features = ["v4"] }
-reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "zstd", "multipart", "stream", "cookies", "system-proxy"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "brotli", "deflate", "zstd", "multipart", "stream", "cookies", "system-proxy", "rustls-tls-native-roots"] }
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
 base64 = "0.22.1"
 keyring = { version = "4.1.2", default-features = false, features = ["v1", "apple-native-keyring-store", "windows-native-keyring-store", "zbus-secret-service-keyring-store"] }
@@ -44,11 +44,31 @@ saphyr = "0.0.6"
 rand = "0.9"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-
-[dev-dependencies]
+# --- gRPC dynamic client (Phase 6 task 4, 17d) ---
+# `protox`/`prost-reflect`/`prost`/`prost-types` promoted from [dev-dependencies]
+# (17c spike) to runtime deps now that 17d builds a real dynamic client.
+protox = "0.9.1"
 prost = "0.14.4"
 prost-reflect = "0.16.4"
 prost-types = "0.14.4"
-protox = "0.9.1"
+# h2 + TLS stack for the hand-rolled gRPC client. reqwest (0.12) doesn't expose
+# raw HTTP/2 trailers, which gRPC needs, so gRPC runs its own `h2` client.
+# rustls (not native-tls) gives clean ALPN `h2` negotiation; both are already
+# transitive deps of reqwest, so adding direct edges adds no new runtime TLS
+# implementation. `_native_roots` variants load OS root certs into rustls so
+# corporate-CA users keep working without a custom trust store config.
+h2 = "0.4"
+rustls = "0.23"
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+webpki-roots = "0.26"
+bytes = "1"
+http = "1"
+
+[dev-dependencies]
 url = "2"
+# Self-signed cert generation for the loopback h2+TLS handshake test (offline
+# proof of the transport chain, mirroring the WS KAT approach). Dev-only: never
+# shipped. Mirrors the `tests/fixtures/grpc/` fixture convention introduced in 17c.
+rcgen = "0.13"
 
