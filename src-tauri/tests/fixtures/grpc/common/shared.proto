@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package spike.common;
+
+message Shared {
+  string value = 1;
+}
