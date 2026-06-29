@@ -201,6 +201,28 @@ const MIGRATIONS: &[&str] = &[
         client_cert_json    TEXT NOT NULL DEFAULT '{"mode":"none"}'
     );
     "#,
+    // v6 — user-authored JS plugins (custom code-generators, custom
+    // import/export formats), sandbox-executed rather than compiled into the
+    // Rust binary. Many rows per workspace, same shape as tags/environments
+    // rather than the one-row-per-workspace `workspace_settings` singleton.
+    // `kind` distinguishes codegen vs import vs export; `language_label` is a
+    // free-form display label (language name for codegen, format name for
+    // import/export). Timestamps are Unix milliseconds, matching every other
+    // table in this schema (see `crate::util::now_millis`).
+    r#"
+    CREATE TABLE plugins (
+        id              TEXT PRIMARY KEY,
+        workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        name            TEXT NOT NULL,
+        kind            TEXT NOT NULL,
+        language_label  TEXT NOT NULL,
+        source          TEXT NOT NULL,
+        enabled         INTEGER NOT NULL DEFAULT 1,
+        created_at      INTEGER NOT NULL,
+        updated_at      INTEGER NOT NULL
+    );
+    CREATE INDEX idx_plugins_workspace ON plugins(workspace_id);
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.
