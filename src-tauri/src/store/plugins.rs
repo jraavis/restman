@@ -1,10 +1,5 @@
 //! Plugin repository — user-authored JS plugins (custom code-generators,
 //! custom import/export formats), many rows per workspace.
-//!
-//! Not yet called outside its own tests: `commands::plugins` (the IPC layer
-//! that will consume this) is a later sequential task. Suppress dead-code
-//! warnings until that lands.
-#![allow(dead_code)]
 
 use crate::error::{AppError, AppResult};
 use crate::model::{Plugin, PluginInput, PluginKind};

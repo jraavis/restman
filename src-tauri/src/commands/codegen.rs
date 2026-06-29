@@ -6,12 +6,14 @@
 //! only) if one exists, else falls back to a visible placeholder.
 
 use crate::auth::oauth::token_store;
-use crate::codegen::{self, CodeLanguage, CodegenOptions, OAUTH2_TOKEN_PLACEHOLDER};
+use crate::codegen::{self, CodegenOptions, CodegenTarget, OAUTH2_TOKEN_PLACEHOLDER};
 use crate::commands::http::resolve_owner_and_config;
+use crate::commands::plugins::require_kind;
 use crate::error::AppResult;
 use crate::model::auth::AuthConfig;
 use crate::model::http::HttpRequest;
-use crate::store::AppState;
+use crate::model::PluginKind;
+use crate::store::{self, AppState};
 use tauri::State;
 
 #[tauri::command]
@@ -21,7 +23,7 @@ pub fn generate_code(
     workspace_id: String,
     collection_id: Option<String>,
     request_id: Option<String>,
-    language: CodeLanguage,
+    target: CodegenTarget,
     options: CodegenOptions,
 ) -> AppResult<String> {
     let resolved = {
@@ -44,5 +46,15 @@ pub fn generate_code(
         other => other,
     };
 
-    codegen::generate(language, &req, &options)
+    match target {
+        CodegenTarget::Native { language } => codegen::generate(language, &req, &options),
+        CodegenTarget::Plugin { plugin_id } => {
+            let plugin = {
+                let conn = state.db.lock().unwrap();
+                store::plugins::get(&conn, &plugin_id)?
+            };
+            require_kind(&plugin, PluginKind::Codegen)?;
+            codegen::plugin::generate(&plugin.source, &req, &options)
+        }
+    }
 }

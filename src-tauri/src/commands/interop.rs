@@ -1,13 +1,34 @@
-use crate::error::AppResult;
+use crate::commands::plugins::require_kind;
+use crate::error::{AppError, AppResult};
 use crate::interop::{self, environment, ConflictMode, ExportFormat, ImportFormat, ImportPreview, ImportReport, ImportedNode, EnvironmentImportReport, EnvironmentPreview};
-use crate::store::AppState;
+use crate::model::PluginKind;
+use crate::store::{self, AppState};
 use tauri::State;
 
-/// Parse raw file content into a preview tree. No DB access — the frontend
-/// renders the result and lets the user confirm before `apply_collection_import`.
+/// Parse raw file content into a preview tree. `format`/`plugin_id` are
+/// mutually exclusive — exactly one must be `Some`, same convention as
+/// `commands::codegen::generate_code`'s `language`/`plugin_id` pair. The
+/// native-format path needs no DB access (unchanged); the plugin path needs
+/// `state` to look up the plugin's source by id.
 #[tauri::command]
-pub fn preview_import(format: ImportFormat, content: String) -> AppResult<ImportPreview> {
-    interop::parse(format, &content)
+pub fn preview_import(
+    state: State<AppState>,
+    format: Option<ImportFormat>,
+    plugin_id: Option<String>,
+    content: String,
+) -> AppResult<ImportPreview> {
+    match (format, plugin_id) {
+        (Some(f), None) => interop::parse(f, &content),
+        (None, Some(id)) => {
+            let plugin = {
+                let conn = state.db.lock().unwrap();
+                store::plugins::get(&conn, &id)?
+            };
+            require_kind(&plugin, PluginKind::Import)?;
+            interop::plugin::parse(&plugin.source, &content)
+        }
+        _ => Err(AppError::Other("preview_import: specify exactly one of format or plugin_id".into())),
+    }
 }
 
 /// Commit a previously-previewed tree under `parent_id` (`None` = workspace
@@ -25,12 +46,26 @@ pub fn apply_collection_import(
 }
 
 /// Export a collection (and everything nested under it) to `format`'s text
-/// representation.
+/// representation, or to a plugin's format — same mutual-exclusivity
+/// convention as `preview_import`.
 #[tauri::command]
-pub fn export_collection(state: State<AppState>, collection_id: String, format: ExportFormat) -> AppResult<String> {
+pub fn export_collection(
+    state: State<AppState>,
+    collection_id: String,
+    format: Option<ExportFormat>,
+    plugin_id: Option<String>,
+) -> AppResult<String> {
     let conn = state.db.lock().unwrap();
     let node = interop::collect(&conn, &collection_id)?;
-    interop::export(format, &node)
+    match (format, plugin_id) {
+        (Some(f), None) => interop::export(f, &node),
+        (None, Some(id)) => {
+            let plugin = store::plugins::get(&conn, &id)?;
+            require_kind(&plugin, PluginKind::Export)?;
+            interop::plugin::export(&plugin.source, &node)
+        }
+        _ => Err(AppError::Other("export_collection: specify exactly one of format or plugin_id".into())),
+    }
 }
 
 /// Environment import/export — the command handlers live in

@@ -1,11 +1,6 @@
 //! User-authored JS plugins: custom code-generators and custom import/export
 //! formats, sandbox-executed rather than compiled into the Rust binary.
 //! Storage only — execution lives in a separate sandbox module.
-//!
-//! Not yet referenced outside `store::plugins` and its tests: the
-//! `commands::plugins` layer that exposes these over IPC is a later
-//! sequential task. Suppress dead-code warnings until that lands.
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
