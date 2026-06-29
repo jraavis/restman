@@ -3,7 +3,7 @@
 //! settings.
 
 import { useState } from "react";
-import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Radio, Settings, Settings2, Trash2, Zap } from "lucide-react";
+import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Puzzle, Radio, Settings, Settings2, Trash2, Zap } from "lucide-react";
 import {
   useActiveWorkspace,
   useCreateWorkspace,
@@ -13,6 +13,7 @@ import {
   useWorkspaces,
 } from "../features/workspaces/hooks";
 import { WorkspaceSettingsDialog } from "../features/workspaces/WorkspaceSettingsDialog";
+import { PluginManagerDialog } from "../features/plugins/PluginManagerDialog";
 import { CookieJarDialog } from "../features/cookies/CookieJarDialog";
 import { SsePanel } from "../features/streaming/SsePanel";
 import { WsPanel } from "../features/streaming/WsPanel";
@@ -36,6 +37,7 @@ export function TopBar() {
   const [wsOpen, setWsOpen] = useState(false);
   const [grpcOpen, setGrpcOpen] = useState(false);
   const [wsSettingsOpen, setWsSettingsOpen] = useState(false);
+  const [pluginsOpen, setPluginsOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -157,6 +159,17 @@ export function TopBar() {
               </button>
               <button
                 type="button"
+                disabled={!active}
+                onClick={() => {
+                  setWsMenuOpen(false);
+                  setPluginsOpen(true);
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+              >
+                <Puzzle size={12} /> Plugins
+              </button>
+              <button
+                type="button"
                 disabled={!active || (workspaces?.length ?? 0) <= 1}
                 onClick={handleDeleteWorkspace}
                 title={(workspaces?.length ?? 0) <= 1 ? "Can't delete the only workspace" : undefined}
@@ -239,6 +252,9 @@ export function TopBar() {
           workspaceName={active.name}
           onClose={() => setWsSettingsOpen(false)}
         />
+      )}
+      {pluginsOpen && active && (
+        <PluginManagerDialog workspaceId={active.id} onClose={() => setPluginsOpen(false)} />
       )}
     </header>
   );
