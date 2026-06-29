@@ -124,6 +124,13 @@ pub fn run() {
             commands::export_environment,
             commands::generate_code,
             commands::write_file_bytes,
+            commands::list_plugins,
+            commands::create_plugin,
+            commands::update_plugin,
+            commands::delete_plugin,
+            commands::preview_plugin_codegen,
+            commands::preview_plugin_import,
+            commands::preview_plugin_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

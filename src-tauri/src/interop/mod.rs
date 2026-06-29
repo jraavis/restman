@@ -24,6 +24,7 @@ pub mod har;
 pub mod http_file;
 pub mod insomnia;
 pub mod openapi;
+pub mod plugin;
 pub mod postman;
 
 use crate::error::AppResult;

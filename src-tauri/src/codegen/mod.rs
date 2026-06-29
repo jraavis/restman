@@ -21,6 +21,7 @@ pub mod go;
 pub mod java;
 pub mod javascript;
 pub mod php;
+pub mod plugin;
 pub mod python;
 pub mod ruby;
 pub mod rust;
@@ -42,6 +43,19 @@ pub enum CodeLanguage {
     Java,
     Csharp,
     Ruby,
+}
+
+/// What `commands::codegen::generate_code` dispatches to: one of the 9
+/// native compiled-Rust languages, or a workspace's stored codegen plugin
+/// by id. A tagged enum rather than two `Option` siblings so "exactly one
+/// of these" is enforced by the type itself rather than a runtime check —
+/// also keeps `generate_code`'s argument count under clippy's
+/// `too_many_arguments` threshold.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CodegenTarget {
+    Native { language: CodeLanguage },
+    Plugin { plugin_id: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
