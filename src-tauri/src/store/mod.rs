@@ -5,6 +5,7 @@ pub mod db;
 pub mod environments;
 pub mod history;
 pub mod migrations;
+pub mod plugins;
 pub mod requests;
 pub mod tabs;
 pub mod tags;
