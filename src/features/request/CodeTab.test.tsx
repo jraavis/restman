@@ -92,6 +92,33 @@ describe("CodeTab", () => {
     ));
   });
 
+  it("hides disabled plugins from the language picker", async () => {
+    vi.mocked(ipc.listPlugins).mockResolvedValue([
+      {
+        id: "plug-1",
+        workspaceId: "ws-1",
+        name: "Disabled Lang",
+        kind: "codegen",
+        languageLabel: "Disabled",
+        source: "",
+        enabled: false,
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ]);
+    vi.mocked(ipc.generateCode).mockResolvedValue("curl -X GET 'https://a.test'");
+    renderWithClient(
+      <CodeTab
+        request={{ ...defaultRequest(), url: "https://a.test" }}
+        workspaceId="ws-1"
+        collectionId={null}
+        requestId={null}
+      />,
+    );
+    await waitFor(() => expect(ipc.listPlugins).toHaveBeenCalled());
+    expect(screen.queryByText("Disabled Lang")).not.toBeInTheDocument();
+  });
+
   it("shows the auth-staleness hint only while auth is included", () => {
     vi.mocked(ipc.generateCode).mockResolvedValue("");
     renderWithClient(

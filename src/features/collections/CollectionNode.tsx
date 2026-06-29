@@ -81,7 +81,8 @@ export function CollectionNode({
   const createRequest = useCreateRequest(workspaceId);
   const moveRequest = useMoveRequest();
   const { open } = useOpenRequest(workspaceId);
-  const { data: exportPlugins } = usePlugins(workspaceId, "export");
+  const { data: allExportPlugins } = usePlugins(workspaceId, "export");
+  const exportPlugins = allExportPlugins?.filter((p) => p.enabled);
 
   const expanded = expandedIds.has(collection.id);
   const children = childrenOf(collections, collection.id, sortMode);

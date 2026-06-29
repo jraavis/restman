@@ -110,7 +110,8 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const { data: importPlugins } = usePlugins(workspaceId, "import");
+  const { data: allImportPlugins } = usePlugins(workspaceId, "import");
+  const importPlugins = allImportPlugins?.filter((p) => p.enabled);
 
   const activeFormat = source.kind === "native" ? COLLECTION_FORMATS.find((f) => f.value === source.format) : undefined;
   const activePlugin = source.kind === "plugin" ? importPlugins?.find((p) => p.id === source.pluginId) : undefined;
