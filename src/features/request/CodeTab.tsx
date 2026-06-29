@@ -51,7 +51,8 @@ export function CodeTab({
 }) {
   const [target, setTarget] = useState<CodegenTarget>({ kind: "native", language: "curl" });
   const [options, setOptions] = useState(defaultCodegenOptions());
-  const { data: plugins } = usePlugins(workspaceId, "codegen");
+  const { data: allPlugins } = usePlugins(workspaceId, "codegen");
+  const plugins = allPlugins?.filter((p) => p.enabled);
 
   const { data: code, error } = useQuery({
     queryKey: ["codegen", workspaceId, collectionId, requestId, target, options, request],
