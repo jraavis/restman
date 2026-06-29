@@ -5,6 +5,7 @@ mod engine;
 mod error;
 mod interop;
 mod model;
+pub mod plugins;
 mod scripting;
 mod secrets;
 mod store;
