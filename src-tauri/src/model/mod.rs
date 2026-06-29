@@ -4,6 +4,7 @@
 pub mod auth;
 pub mod collection;
 pub mod environment;
+pub mod grpc;
 pub mod history;
 pub mod http;
 pub mod request;

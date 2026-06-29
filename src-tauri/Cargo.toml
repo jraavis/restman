@@ -49,7 +49,7 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 # (17c spike) to runtime deps now that 17d builds a real dynamic client.
 protox = "0.9.1"
 prost = "0.14.4"
-prost-reflect = "0.16.4"
+prost-reflect = { version = "0.16.4", features = ["serde"] }
 prost-types = "0.14.4"
 # h2 + TLS stack for the hand-rolled gRPC client. reqwest (0.12) doesn't expose
 # raw HTTP/2 trailers, which gRPC needs, so gRPC runs its own `h2` client.
