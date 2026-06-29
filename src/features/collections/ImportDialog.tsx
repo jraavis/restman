@@ -7,6 +7,7 @@
 import { useState, type ChangeEvent } from "react";
 import { AlertTriangle, CheckCircle2, ChevronRight, File, Folder, Upload } from "lucide-react";
 import { ipc } from "../../lib/ipc";
+import { usePlugins } from "../plugins/hooks";
 import type {
   ConflictMode,
   EnvironmentImportReport,
@@ -16,6 +17,18 @@ import type {
   ImportPreview,
   ImportReport,
 } from "../../lib/types";
+
+/** Mutually exclusive native-format vs. plugin-id selector for `previewImport`
+ * — same shape `ipc.previewImport`'s `source` param expects. */
+type ImportSource = { kind: "native"; format: ImportFormat } | { kind: "plugin"; pluginId: string };
+
+function sourceToOptionValue(source: ImportSource): string {
+  return source.kind === "native" ? `native:${source.format}` : `plugin:${source.pluginId}`;
+}
+function optionValueToSource(value: string): ImportSource {
+  if (value.startsWith("plugin:")) return { kind: "plugin", pluginId: value.slice("plugin:".length) };
+  return { kind: "native", format: value.slice("native:".length) as ImportFormat };
+}
 
 interface ImportDialogProps {
   workspaceId: string;
@@ -92,13 +105,15 @@ const COLLECTION_FORMATS: { value: ImportFormat; label: string; accept: string; 
 export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "collection" }: ImportDialogProps) {
   const [kind, setKind] = useState<Kind>(defaultKind);
   const [step, setStep] = useState<Step>({ phase: "input" });
-  const [format, setFormat] = useState<ImportFormat>("postman");
+  const [source, setSource] = useState<ImportSource>({ kind: "native", format: "postman" });
   const [mode, setMode] = useState<ConflictMode>("skip");
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { data: importPlugins } = usePlugins(workspaceId, "import");
 
-  const activeFormat = COLLECTION_FORMATS.find((f) => f.value === format) ?? COLLECTION_FORMATS[0];
+  const activeFormat = source.kind === "native" ? COLLECTION_FORMATS.find((f) => f.value === source.format) : undefined;
+  const activePlugin = source.kind === "plugin" ? importPlugins?.find((p) => p.id === source.pluginId) : undefined;
 
   async function loadContent(content: string) {
     if (!content.trim()) return;
@@ -109,7 +124,10 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
         const preview = await ipc.previewEnvironmentImport(content);
         setStep({ phase: "env_preview", preview });
       } else {
-        const preview = await ipc.previewImport(content, { format });
+        const preview = await ipc.previewImport(
+          content,
+          source.kind === "native" ? { format: source.format } : { pluginId: source.pluginId },
+        );
         setStep({ phase: "preview", preview });
       }
     } catch (e) {
@@ -183,26 +201,39 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
                   <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
                     Format
                     <select
-                      value={format}
-                      onChange={(e) => setFormat(e.target.value as ImportFormat)}
+                      value={sourceToOptionValue(source)}
+                      onChange={(e) => setSource(optionValueToSource(e.target.value))}
                       className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
                     >
-                      {COLLECTION_FORMATS.map((f) => (
-                        <option key={f.value} value={f.value}>
-                          {f.label}
-                        </option>
-                      ))}
+                      <optgroup label="Formats">
+                        {COLLECTION_FORMATS.map((f) => (
+                          <option key={f.value} value={`native:${f.value}`}>
+                            {f.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                      {importPlugins && importPlugins.length > 0 && (
+                        <optgroup label="Plugins">
+                          {importPlugins.map((p) => (
+                            <option key={p.id} value={`plugin:${p.id}`}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </label>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{activeFormat.blurb}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {activeFormat?.blurb ?? `Import using the "${activePlugin?.name ?? ""}" plugin.`}
+                  </p>
                   <input
                     type="file"
-                    accept={activeFormat.accept}
+                    accept={activeFormat?.accept ?? "*/*"}
                     onChange={(e) => void onFile(e)}
                     className="text-xs text-slate-600 dark:text-slate-300"
                   />
                   <textarea
-                    placeholder={activeFormat.placeholder}
+                    placeholder={activeFormat?.placeholder ?? "…or paste content here"}
                     rows={10}
                     onBlur={(e) => void loadContent(e.target.value)}
                     className="w-full rounded border border-slate-200 px-2 py-1.5 font-mono text-xs focus:outline-none dark:border-slate-700 dark:bg-slate-800"

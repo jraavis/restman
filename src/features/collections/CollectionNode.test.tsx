@@ -20,6 +20,7 @@ vi.mock("../../lib/ipc", () => ({
   ipc: {
     exportCollection: vi.fn(),
     writeFileBytes: vi.fn(),
+    listPlugins: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -38,7 +39,7 @@ function makeCollection(overrides: Partial<Collection> = {}): Collection {
   };
 }
 
-function renderNode(collection: Collection) {
+function renderNode(collection: Collection, workspaceId: string | undefined = "ws-1") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
@@ -48,7 +49,7 @@ function renderNode(collection: Collection) {
       collection={collection}
       collections={[collection]}
       depth={0}
-      workspaceId={undefined}
+      workspaceId={workspaceId}
       expandedIds={new Set()}
       onToggleExpand={() => {}}
       dragRef={{ current: null }}
@@ -93,5 +94,31 @@ describe("CollectionNode export", () => {
 
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(ipc.writeFileBytes).not.toHaveBeenCalled();
+  });
+
+  it("offers export plugins in the menu and routes them to exportCollection by id", async () => {
+    vi.mocked(ipc.listPlugins).mockResolvedValue([
+      {
+        id: "plug-1",
+        workspaceId: "ws-1",
+        name: "My Format",
+        kind: "export",
+        languageLabel: "My Format",
+        source: "",
+        enabled: true,
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ]);
+    const collection = makeCollection();
+    vi.mocked(ipc.exportCollection).mockResolvedValue("plugin output");
+    vi.mocked(save).mockResolvedValue("/tmp/My_Collection.txt");
+
+    renderNode(collection);
+    fireEvent.click(screen.getByTitle("Collection actions"));
+    fireEvent.click(await screen.findByRole("button", { name: /export to my format/i }));
+
+    await waitFor(() => expect(ipc.exportCollection).toHaveBeenCalledWith("col-1", { pluginId: "plug-1" }));
+    expect(save).toHaveBeenCalledWith({ defaultPath: "My_Collection.txt" });
   });
 });

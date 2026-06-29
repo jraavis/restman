@@ -1,3 +1,5 @@
+import type { ReactElement, ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ImportDialog } from "./ImportDialog";
@@ -9,12 +11,21 @@ import type {
   ImportedNode,
 } from "../../lib/types";
 
+function renderWithClient(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  return render(ui, { wrapper });
+}
+
 vi.mock("../../lib/ipc", () => ({
   ipc: {
     previewImport: vi.fn(),
     applyCollectionImport: vi.fn(),
     previewEnvironmentImport: vi.fn(),
     applyEnvironmentImport: vi.fn(),
+    listPlugins: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -50,7 +61,7 @@ describe("ImportDialog", () => {
   });
 
   it("renders the paste/upload input step initially", () => {
-    render(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
+    renderWithClient(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
     expect(screen.getByPlaceholderText(/paste collection json/i)).toBeInTheDocument();
   });
 
@@ -77,7 +88,7 @@ describe("ImportDialog", () => {
     });
     vi.mocked(ipc.previewImport).mockResolvedValue(preview);
 
-    render(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
+    renderWithClient(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
     pasteJson('{"info":{}}');
 
     await waitFor(() => expect(ipc.previewImport).toHaveBeenCalledWith('{"info":{}}', { format: "postman" }));
@@ -91,7 +102,7 @@ describe("ImportDialog", () => {
     vi.mocked(ipc.previewImport).mockResolvedValue(
       makePreview({ warnings: ["unsupported auth type: digest"], stats: { folders: 0, requests: 0, warnings: 1 } }),
     );
-    render(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
+    renderWithClient(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
     pasteJson("{}");
 
     expect(await screen.findByText(/unsupported auth type: digest/)).toBeInTheDocument();
@@ -108,7 +119,7 @@ describe("ImportDialog", () => {
     };
     vi.mocked(ipc.applyCollectionImport).mockResolvedValue(report);
 
-    render(<ImportDialog workspaceId="ws-1" parentId="col-parent" onClose={() => {}} />);
+    renderWithClient(<ImportDialog workspaceId="ws-1" parentId="col-parent" onClose={() => {}} />);
     pasteJson("{}");
     await screen.findByText("Pet Store");
 
@@ -131,7 +142,7 @@ describe("ImportDialog", () => {
 
   it("shows an error message when preview parsing fails", async () => {
     vi.mocked(ipc.previewImport).mockRejectedValue("invalid JSON: missing field `info`");
-    render(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
+    renderWithClient(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
     pasteJson("not json");
 
     expect(await screen.findByText(/invalid JSON/)).toBeInTheDocument();
@@ -139,13 +150,38 @@ describe("ImportDialog", () => {
 
   it("offers OpenAPI as an import format and routes it to previewImport with the snake_case id", async () => {
     vi.mocked(ipc.previewImport).mockResolvedValue(makePreview());
-    render(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
-    fireEvent.change(screen.getByRole("combobox", { name: /Format/i }), { target: { value: "open_api" } });
+    renderWithClient(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
+    fireEvent.change(screen.getByRole("combobox", { name: /Format/i }), { target: { value: "native:open_api" } });
     const textarea = screen.getByPlaceholderText(/OpenAPI\/Swagger JSON or YAML/i);
     fireEvent.change(textarea, { target: { value: "openapi: 3.0.0" } });
     fireEvent.blur(textarea);
 
     await waitFor(() => expect(ipc.previewImport).toHaveBeenCalledWith("openapi: 3.0.0", { format: "open_api" }));
+  });
+
+  it("offers import plugins in the format picker and routes them to previewImport by id", async () => {
+    vi.mocked(ipc.listPlugins).mockResolvedValue([
+      {
+        id: "plug-1",
+        workspaceId: "ws-1",
+        name: "My Format",
+        kind: "import",
+        languageLabel: "My Format",
+        source: "",
+        enabled: true,
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ]);
+    vi.mocked(ipc.previewImport).mockResolvedValue(makePreview());
+    renderWithClient(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
+    await screen.findByText("My Format");
+    fireEvent.change(screen.getByRole("combobox", { name: /Format/i }), { target: { value: "plugin:plug-1" } });
+    const textarea = screen.getByPlaceholderText(/paste content here/i);
+    fireEvent.change(textarea, { target: { value: "anything" } });
+    fireEvent.blur(textarea);
+
+    await waitFor(() => expect(ipc.previewImport).toHaveBeenCalledWith("anything", { pluginId: "plug-1" }));
   });
 
   describe("environment mode", () => {
@@ -159,7 +195,7 @@ describe("ImportDialog", () => {
 
     it("defaults to environment when defaultKind is set, parses via previewEnvironmentImport, and renders the variable table", async () => {
       vi.mocked(ipc.previewEnvironmentImport).mockResolvedValue(makeEnvPreview());
-      render(<ImportDialog workspaceId="ws-1" parentId={null} defaultKind="environment" onClose={() => {}} />);
+      renderWithClient(<ImportDialog workspaceId="ws-1" parentId={null} defaultKind="environment" onClose={() => {}} />);
       const textarea = screen.getByPlaceholderText(/paste environment JSON/i);
       fireEvent.change(textarea, { target: { value: '{"name":"Production"}' } });
       fireEvent.blur(textarea);
@@ -172,7 +208,7 @@ describe("ImportDialog", () => {
     it("confirms environment import via applyEnvironmentImport and shows the variable-created count", async () => {
       vi.mocked(ipc.previewEnvironmentImport).mockResolvedValue(makeEnvPreview());
       vi.mocked(ipc.applyEnvironmentImport).mockResolvedValue({ createdVariables: 1, overwritten: 0, warnings: [] });
-      render(<ImportDialog workspaceId="ws-1" parentId="parent-col" defaultKind="environment" onClose={() => {}} />);
+      renderWithClient(<ImportDialog workspaceId="ws-1" parentId="parent-col" defaultKind="environment" onClose={() => {}} />);
       const textarea = screen.getByPlaceholderText(/paste environment JSON/i);
       fireEvent.change(textarea, { target: { value: "{}" } });
       fireEvent.blur(textarea);
