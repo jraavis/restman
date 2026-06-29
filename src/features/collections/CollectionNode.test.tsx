@@ -72,7 +72,7 @@ describe("CollectionNode export", () => {
     fireEvent.click(screen.getByTitle("Collection actions"));
     fireEvent.click(screen.getByRole("button", { name: /export to postman/i }));
 
-    await waitFor(() => expect(ipc.exportCollection).toHaveBeenCalledWith("col-1", "postman"));
+    await waitFor(() => expect(ipc.exportCollection).toHaveBeenCalledWith("col-1", { format: "postman" }));
     expect(save).toHaveBeenCalledWith({ defaultPath: "My_Collection.postman_collection.json" });
     await waitFor(() =>
       expect(ipc.writeFileBytes).toHaveBeenCalledWith(

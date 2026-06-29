@@ -5,8 +5,8 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type { HeaderEntry, HttpRequest, HttpResponse } from "./http";
 import type {
   AuthConfig,
-  CodeLanguage,
   CodegenOptions,
+  CodegenTarget,
   Collection,
   CollectionRunOptions,
   CollectionRunSummary,
@@ -26,6 +26,9 @@ import type {
   ImportPreview,
   ImportReport,
   OAuth2Status,
+  Plugin,
+  PluginInput,
+  PluginKind,
   SavedRequest,
   SavedRequestInput,
   SearchHit,
@@ -163,17 +166,27 @@ export const ipc = {
     invoke<void>("close_other_tabs", { workspaceId, keepId }),
   closeAllTabs: (workspaceId: string) => invoke<void>("close_all_tabs", { workspaceId }),
 
-  // Import / export
-  previewImport: (format: ImportFormat, content: string) =>
-    invoke<ImportPreview>("preview_import", { format, content }),
+  // Import / export. `source`/`target` are mutually exclusive native-format
+  // vs. plugin-id selectors — mirrors `commands::interop`'s `format`/
+  // `plugin_id` pair on the Rust side.
+  previewImport: (content: string, source: { format: ImportFormat } | { pluginId: string }) =>
+    invoke<ImportPreview>("preview_import", {
+      content,
+      format: "format" in source ? source.format : null,
+      pluginId: "pluginId" in source ? source.pluginId : null,
+    }),
   applyCollectionImport: (
     workspaceId: string,
     parentId: string | null,
     root: ImportedNode,
     mode: ConflictMode,
   ) => invoke<ImportReport>("apply_collection_import", { workspaceId, parentId, root, mode }),
-  exportCollection: (collectionId: string, format: ExportFormat) =>
-    invoke<string>("export_collection", { collectionId, format }),
+  exportCollection: (collectionId: string, target: { format: ExportFormat } | { pluginId: string }) =>
+    invoke<string>("export_collection", {
+      collectionId,
+      format: "format" in target ? target.format : null,
+      pluginId: "pluginId" in target ? target.pluginId : null,
+    }),
 
   // Environment import / export
   previewEnvironmentImport: (content: string) =>
@@ -264,7 +277,23 @@ export const ipc = {
     workspaceId: string,
     collectionId: string | null,
     requestId: string | null,
-    language: CodeLanguage,
+    target: CodegenTarget,
     options: CodegenOptions,
-  ) => invoke<string>("generate_code", { req, workspaceId, collectionId, requestId, language, options }),
+  ) => invoke<string>("generate_code", { req, workspaceId, collectionId, requestId, target, options }),
+
+  // Plugins (Phase 6 task 5) — JS plugins, sandbox-executed via `plugins::runtime`.
+  listPlugins: (workspaceId: string, kind?: PluginKind | null) =>
+    invoke<Plugin[]>("list_plugins", { workspaceId, kind: kind ?? null }),
+  createPlugin: (workspaceId: string, input: PluginInput) =>
+    invoke<Plugin>("create_plugin", { workspaceId, input }),
+  updatePlugin: (id: string, input: PluginInput) => invoke<Plugin>("update_plugin", { id, input }),
+  deletePlugin: (id: string) => invoke<void>("delete_plugin", { id }),
+  // "Test before saving" previews — run raw, unpersisted plugin source
+  // through the same sandbox the saved-plugin dispatch path uses.
+  previewPluginCodegen: (source: string, req: HttpRequest, options: CodegenOptions) =>
+    invoke<string>("preview_plugin_codegen", { source, req, options }),
+  previewPluginImport: (source: string, content: string) =>
+    invoke<ImportPreview>("preview_plugin_import", { source, content }),
+  previewPluginExport: (source: string, node: ImportedNode) =>
+    invoke<string>("preview_plugin_export", { source, node }),
 };

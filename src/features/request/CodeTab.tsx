@@ -43,7 +43,15 @@ export function CodeTab({
 
   const { data: code, error } = useQuery({
     queryKey: ["codegen", workspaceId, collectionId, requestId, language, options, request],
-    queryFn: () => ipc.generateCode(request, workspaceId as string, collectionId, requestId, language, options),
+    queryFn: () =>
+      ipc.generateCode(
+        request,
+        workspaceId as string,
+        collectionId,
+        requestId,
+        { kind: "native", language },
+        options,
+      ),
     enabled: !!workspaceId && request.url.trim() !== "",
     placeholderData: (prev) => prev,
   });
