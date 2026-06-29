@@ -74,7 +74,6 @@ use self::transport::GrpcTransport;
 /// against a `DescriptorPool`. Shared by `call_unary` and (later) the
 /// streaming drive functions in #31, since the lookup itself doesn't depend
 /// on the RPC's streaming mode.
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring) / #31 (streaming RPC modes)
 pub(crate) fn resolve_method(
     pool: &DescriptorPool,
     method_full_name: &str,
@@ -100,7 +99,6 @@ pub(crate) fn resolve_method(
 /// `MessageDescriptor: DeserializeSeed` impl) — this is what lets the
 /// frontend hand over a plain JSON object built by `GrpcMessageBuilder.tsx`
 /// without either side needing a compile-time Rust type for the message.
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring) / #31 (streaming RPC modes)
 pub(crate) fn json_to_dynamic_message(
     descriptor: &prost_reflect::MessageDescriptor,
     json: serde_json::Value,
@@ -113,7 +111,6 @@ pub(crate) fn json_to_dynamic_message(
 
 /// Converts a decoded `DynamicMessage` back to JSON for the frontend, again
 /// via `prost-reflect`'s `serde` support (`DynamicMessage: Serialize`).
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring) / #31 (streaming RPC modes)
 pub(crate) fn dynamic_message_to_json(message: &DynamicMessage) -> AppResult<serde_json::Value> {
     serde_json::to_value(message)
         .map_err(|e| AppError::Other(format!("failed to convert response message to JSON: {e}")))
@@ -125,7 +122,6 @@ pub(crate) fn dynamic_message_to_json(message: &DynamicMessage) -> AppResult<ser
 /// constructing `model::grpc::GrpcEvent` directly in this module) so
 /// `call_unary` stays usable from a future non-Tauri-Channel caller (e.g. a
 /// test) without dragging in the IPC event enum's full surface.
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring)
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GrpcStatus {
     pub code: u32,
@@ -171,7 +167,6 @@ fn status_from_header_map(headers: &http::HeaderMap) -> AppResult<GrpcStatus> {
 /// (added in 17d-7 specifically to close it). Used by both `call_unary` and
 /// the streaming drive loop in #31, since both end the same way: drain
 /// frames, then resolve one final status.
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring) / #31 (streaming RPC modes)
 async fn resolve_call_status(stream: &mut transport::GrpcStream) -> AppResult<GrpcStatus> {
     let trailers = stream.recv_trailers().await?.unwrap_or_default();
     if trailers.contains_key("grpc-status") {
@@ -185,7 +180,6 @@ async fn resolve_call_status(stream: &mut transport::GrpcStream) -> AppResult<Gr
 /// the server sent exactly one, which it should for a successful unary RPC —
 /// `None` if the call errored before any message arrived) plus the gRPC
 /// status read from trailers.
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring)
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct UnaryCallResult {
     pub response: Option<serde_json::Value>,
@@ -200,7 +194,6 @@ pub(crate) struct UnaryCallResult {
 /// moving on to trailers — a second frame would indicate a server-streaming
 /// method was called as if unary, which is a caller error this function
 /// doesn't attempt to paper over.
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring)
 pub(crate) async fn call_unary(
     pool: &DescriptorPool,
     method_full_name: &str,
@@ -276,7 +269,6 @@ pub(crate) async fn call_unary(
 /// than bare `Value` so a sender can explicitly half-close (client-streaming/
 /// bidi's "no more requests") without needing a sentinel JSON value or a
 /// second channel.
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring)
 pub(crate) type GrpcRequestMsg = Option<serde_json::Value>;
 
 /// Drives one streaming gRPC call (client-streaming, server-streaming, or
@@ -317,7 +309,6 @@ pub(crate) type GrpcRequestMsg = Option<serde_json::Value>;
 /// can derive that from having called the send command itself; there's no
 /// information from the transport to relay back, so adding an event for it
 /// would just be restating the caller's own input.
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring)
 pub(crate) async fn drive_streaming_call(
     pool: &DescriptorPool,
     method_full_name: &str,
