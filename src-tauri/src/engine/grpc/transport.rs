@@ -130,14 +130,15 @@ pub(crate) struct GrpcStream {
 
 /// Lazily-resolved response half of a `GrpcStream`. Starts holding the raw h2
 /// future from `send_request`; the first call that needs headers/body/status
-/// takes and awaits it, then caches the resulting status + body stream.
-/// `pending_future` is `None` only in the instant between taking it out to
-/// await and storing the resolved `Ready` state — never observable from
-/// outside `resolve_response`.
+/// awaits it *in place* (never `take()`n out — see `resolve_response`'s doc
+/// comment for why that distinction matters for `tokio::select!`
+/// cancellation safety) and caches the resulting status + headers + body
+/// stream.
 enum ResponseState {
-    Pending(Option<ResponseFuture>),
+    Pending(ResponseFuture),
     Ready {
         status: StatusCode,
+        headers: HeaderMap,
         body: h2::RecvStream,
     },
 }
@@ -249,7 +250,7 @@ impl GrpcTransport {
 
         Ok(GrpcStream {
             send_stream,
-            response: ResponseState::Pending(Some(response_future)),
+            response: ResponseState::Pending(response_future),
             pending: VecDeque::new(),
             unframer: FrameUnframer::default(),
         })
@@ -270,6 +271,24 @@ impl GrpcStream {
             .map_err(|e| AppError::Other(format!("failed to send gRPC frame: {e}")))
     }
 
+    /// Half-closes the send side with no further data: a true HTTP/2
+    /// zero-length DATA frame carrying `END_STREAM`, *not* a gRPC message —
+    /// `framing::frame(&[])` would instead emit a 5-byte length-prefixed
+    /// frame for an empty *message* (compression-flag byte + 4-byte
+    /// length-0), which is a real (if degenerate) gRPC message and would
+    /// corrupt a client-streaming exchange where the server counts messages.
+    /// Needed for client-streaming/bidi once the last request message has
+    /// already gone out via `send_frame(_, false)` and the caller is done
+    /// sending — `send_frame`'s own `end_of_stream` flag only covers the
+    /// "last message IS the final frame" case; this covers "no more
+    /// messages, full stop" after the fact.
+    #[allow(dead_code)] // caller lands in #31 (streaming RPC drive loop)
+    pub(crate) fn half_close(&mut self) -> Result<(), AppError> {
+        self.send_stream
+            .send_data(Bytes::new(), true)
+            .map_err(|e| AppError::Other(format!("failed to half-close gRPC request stream: {e}")))
+    }
+
     /// Resolves the response headers (awaiting them on first call, then
     /// caching) and returns the HTTP/2 response status. This is distinct from
     /// the gRPC status, which rides in trailers — see `recv_trailers`. A
@@ -284,23 +303,65 @@ impl GrpcStream {
         }
     }
 
+    /// Returns the HTTP/2 response HEADERS frame's header map (awaiting it on
+    /// first call, same as `http_status`). Exists for the "Trailers-Only"
+    /// response shape gRPC servers are allowed to use for an immediate error
+    /// (most commonly: a method that doesn't exist, or one rejected before
+    /// any message is read/written) — `grpc-status`/`grpc-message` arrive
+    /// directly in this HEADERS frame, with no DATA frame and no separate
+    /// HTTP/2 trailers frame at all. Without this accessor, a caller that
+    /// only checks `recv_trailers` after `recv_frame` returns `None` would
+    /// see `None` trailers and have no way to tell "no status info at all"
+    /// apart from "status was actually in headers" — silently defaulting to
+    /// OK either way, which would hide a real RPC failure (#28's 17d-6 report
+    /// flagged exactly this gap, deferred until this module was editable
+    /// again in 17d-7).
+    #[allow(dead_code)] // callers land in #31 (streaming RPC drive loop)
+    pub(crate) async fn response_headers(&mut self) -> Result<&HeaderMap, AppError> {
+        self.resolve_response().await?;
+        match &self.response {
+            ResponseState::Ready { headers, .. } => Ok(headers),
+            ResponseState::Pending(_) => unreachable!("resolve_response always leaves Ready"),
+        }
+    }
+
     /// Awaits the response future the first time it's needed (lazily, so
     /// `send()` never blocks on it before the caller has sent any request
-    /// frames) and caches the resulting status + body stream. A no-op on
-    /// every call after the first.
+    /// frames) and caches the resulting status + headers + body stream. A
+    /// no-op on every call after the first.
+    ///
+    /// Cancellation-safety matters here specifically because the streaming
+    /// drive loop (`engine::grpc::drive_streaming_call`) calls `recv_frame`
+    /// (which calls this) inside a `tokio::select!` arm — `select!` polls
+    /// every arm's future once per loop iteration and drops whichever one(s)
+    /// didn't complete, so `resolve_response`'s own future can be cancelled
+    /// mid-await on any given iteration and re-entered on the next. The
+    /// future is therefore awaited *in place*, through `&mut` on the
+    /// `Pending` variant, never `take()`n out first: if this await is
+    /// cancelled, `self.response` is untouched (still `Pending`, holding the
+    /// same not-yet-resolved `ResponseFuture`), so the next call simply polls
+    /// it again — the normal, documented behavior of any `Future` per the
+    /// `std::future::Future` contract, since `h2`'s `ResponseFuture` doesn't
+    /// drop any buffered state on a dropped poll. An earlier version of this
+    /// function `take()`-then-awaited a temporary, which left `Pending` *or*
+    /// briefly empty for the duration of the await; a `select!`-driven
+    /// cancellation there could permanently lose the future and panic on the
+    /// next call — caught by 17d-7's streaming loopback tests.
     async fn resolve_response(&mut self) -> Result<(), AppError> {
-        let fut = match &mut self.response {
+        let response = match &mut self.response {
             ResponseState::Ready { .. } => return Ok(()),
             ResponseState::Pending(fut) => fut
-                .take()
-                .expect("resolve_response is the only place that takes the pending future"),
+                .await
+                .map_err(|e| AppError::Other(format!("gRPC response failed: {e}")))?,
         };
-        let response = fut
-            .await
-            .map_err(|e| AppError::Other(format!("gRPC response failed: {e}")))?;
         let status = response.status();
+        let headers = response.headers().clone();
         let body = response.into_body();
-        self.response = ResponseState::Ready { status, body };
+        self.response = ResponseState::Ready {
+            status,
+            headers,
+            body,
+        };
         Ok(())
     }
 
@@ -634,6 +695,109 @@ mod tests {
         assert_eq!(
             trailers.get("grpc-message").map(|v| v.to_str().unwrap()),
             Some("")
+        );
+
+        server.await.expect("server task did not finish cleanly");
+    }
+
+    /// Proves `response_headers()` can see a "Trailers-Only" gRPC response:
+    /// the server puts `grpc-status`/`grpc-message` directly in the HEADERS
+    /// frame (no DATA frame, no separate HTTP/2 trailers frame at all) —
+    /// real servers use this shape for an immediate error, most commonly
+    /// "method not found." Before this accessor existed, a caller could only
+    /// see `recv_frame` return `None` and `recv_trailers` return `None`,
+    /// with no way to distinguish "no status info at all" from "status was
+    /// actually in headers" — silently defaulting to OK either way, which
+    /// would hide a real RPC failure (flagged as a gap in the 17d-6 unary
+    /// drive's report, fixed here in 17d-7 since streaming modes hit the
+    /// same shape: a server-streaming RPC that errors before sending any
+    /// message looks exactly like this).
+    #[tokio::test(flavor = "current_thread")]
+    async fn trailers_only_response_status_is_readable_from_headers() {
+        let (cert, key) = self_signed_cert();
+        let server_cfg = server_config(cert.clone(), key);
+        let client_cfg = test_client_config(cert);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+
+        let server = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.expect("server accept tcp");
+            let acceptor = TlsAcceptor::from(server_cfg);
+            let tls = acceptor.accept(sock).await.expect("server tls handshake");
+
+            let mut conn = h2::server::handshake(tls)
+                .await
+                .expect("server h2 handshake");
+            let (request, mut respond) = conn
+                .accept()
+                .await
+                .expect("server should see an incoming stream")
+                .expect("server accept should not error");
+            tokio::spawn(async move { while conn.accept().await.is_some() {} });
+
+            // Drain the client's request body before responding.
+            let mut body = request.into_body();
+            while let Some(chunk) = body.data().await {
+                let chunk = chunk.expect("server body read");
+                let _ = body.flow_control().release_capacity(chunk.len());
+            }
+
+            // Trailers-Only: grpc-status/grpc-message ride in the HEADERS
+            // frame itself, end_of_stream = true, no DATA frame and no
+            // separate trailers frame follow at all.
+            let response = http::Response::builder()
+                .status(200)
+                .header("grpc-status", "12")
+                .header("grpc-message", "unimplemented method")
+                .body(())
+                .expect("server response head");
+            respond
+                .send_response(response, true)
+                .expect("server send_response (end_of_stream)");
+        });
+
+        let sock = TcpStream::connect(addr).await.expect("client tcp connect");
+        let connector = TlsConnector::from(client_cfg);
+        let domain = ServerName::try_from("localhost").expect("server name");
+        let tls = connector
+            .connect(domain, sock)
+            .await
+            .expect("client tls handshake");
+
+        let mut transport = GrpcTransport::drive(tls, "localhost:0".to_string(), true)
+            .await
+            .expect("client h2 handshake over the loopback TLS session");
+
+        let mut stream = transport
+            .send("/test.Service/Method")
+            .await
+            .expect("client send should open a stream");
+        stream
+            .send_frame(&[], true)
+            .expect("client send_frame should succeed");
+
+        // No response message and no separate trailers frame at all.
+        let frame = stream.recv_frame().await.expect("client recv_frame");
+        assert_eq!(frame, None, "Trailers-Only response sends no DATA frame");
+        let trailers = stream.recv_trailers().await.expect("client recv_trailers");
+        assert_eq!(
+            trailers, None,
+            "Trailers-Only response sends no separate trailers frame"
+        );
+
+        // The status is readable from the HEADERS frame itself.
+        let headers = stream
+            .response_headers()
+            .await
+            .expect("client response_headers");
+        assert_eq!(
+            headers.get("grpc-status").map(|v| v.to_str().unwrap()),
+            Some("12")
+        );
+        assert_eq!(
+            headers.get("grpc-message").map(|v| v.to_str().unwrap()),
+            Some("unimplemented method")
         );
 
         server.await.expect("server task did not finish cleanly");

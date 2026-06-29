@@ -23,23 +23,33 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Events pushed to the frontend over the course of one gRPC call (unary now;
-/// the streaming modes in #31 reuse this same enum — `Response`/`Message` can
-/// fire more than once for server-streaming, and `Sent` borrows the same
-/// shape a client-stream send-ack would need).
+/// Events pushed to the frontend over the course of one gRPC call — unary
+/// (`call_unary`) and the streaming modes (`drive_streaming_call`, 17d-7)
+/// both emit this same enum without any mode-specific variants: `Response`
+/// fires once for unary/client-streaming and once per server message for
+/// server-streaming/bidi, `Status`/`Closed` always end the call exactly the
+/// same way regardless of mode. No "Sent"/ack variant was needed for
+/// outbound streaming messages — see `engine::grpc::drive_streaming_call`'s
+/// doc comment for why an ack-on-send event isn't part of this protocol.
 #[allow(dead_code)] // caller lands in #29 (Tauri command wiring)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GrpcEvent {
-    /// The h2 stream opened and the request frame(s) were sent. Unlike
+    /// The h2 stream opened: request headers are on the wire. Unlike
     /// `WsEvent::Open` (which fires after a handshake completes before any
-    /// data flows), this fires after the request is already on the wire —
-    /// gRPC has no separate handshake step the way WS upgrade does.
+    /// data flows), gRPC has no separate handshake step the way WS upgrade
+    /// does — this fires as soon as the stream itself opens, *before* any
+    /// request message frame is sent. That ordering is deliberate, not just
+    /// "as early as possible": for client-streaming/bidi, request frames
+    /// keep flowing throughout the call (driven by the UI's own send
+    /// actions), so "after the request frame(s) were sent" has no single
+    /// point in time it could mean for those modes.
     Open,
     /// One decoded response message, converted from its wire-format
     /// `DynamicMessage` to JSON via the method's output descriptor. For a
-    /// unary call this fires at most once; server-streaming (#31) fires it
-    /// once per server message.
+    /// unary or client-streaming call this fires at most once;
+    /// server-streaming/bidi (`drive_streaming_call`, 17d-7) fire it once per
+    /// server message, in the order the server sent them.
     Response { message: serde_json::Value },
     /// The HTTP/2 trailers carrying the RPC's actual verdict (`grpc-status` /
     /// `grpc-message`) arrived. This is the gRPC-level success/failure
@@ -55,9 +65,13 @@ pub enum GrpcEvent {
     /// `Status` event (even an error one) means the server actually
     /// responded. Terminal.
     Error { message: String },
-    /// No further events follow on this channel. Sent after `Status` on the
-    /// success/failure path, or standalone if the peer closed the stream
-    /// without ever sending trailers.
+    /// No further events follow on this channel. Always sent immediately
+    /// after a `Status` event on the drive paths in this codebase
+    /// (`call_unary`/`drive_streaming_call`'s `resolve_call_status` always
+    /// resolves to a `GrpcStatus` — defaulting to code 0 if the peer closed
+    /// without sending any status info at all — so a bare `Closed` with no
+    /// preceding `Status` does not occur on the success/failure path; only
+    /// `Error` skips `Status` entirely).
     Closed,
 }
 
