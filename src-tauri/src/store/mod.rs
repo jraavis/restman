@@ -20,14 +20,31 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
+use crate::engine::grpc::GrpcRequestMsg;
+
+/// The outbound-send half of a live streaming connection, when the protocol
+/// supports sending after connect at all. A plain `enum` rather than a
+/// generic `StreamHandle<T>` because `AppState::streams` is one
+/// `HashMap<String, StreamHandle>` shared across every protocol — a generic
+/// handle would need the map itself to be generic (or boxed/`dyn`), which
+/// buys nothing here since there are exactly two concrete payload shapes
+/// (WS frames, gRPC request JSON) and `ws_send`/`grpc_send` each only ever
+/// need to match their own arm and reject the other (mirroring how `ws_send`
+/// already rejected `sender: None` before this enum existed).
+pub enum StreamSender {
+    Ws(UnboundedSender<WsMessage>),
+    Grpc(UnboundedSender<GrpcRequestMsg>),
+}
+
 /// A live streaming connection's handle, keyed by connection id in
 /// `AppState::streams`. Every protocol gets `task` (abort on disconnect);
 /// only protocols that support sending after connect (WebSocket; gRPC
-/// client/bidi streaming later) populate `sender`. SSE is receive-only, so
-/// its entries always have `sender: None`.
+/// client-streaming/bidi) populate `sender`. SSE and unary/server-streaming
+/// gRPC are send-once-then-receive-only, so their entries always have
+/// `sender: None`.
 pub struct StreamHandle {
     pub task: JoinHandle<()>,
-    pub sender: Option<UnboundedSender<WsMessage>>,
+    pub sender: Option<StreamSender>,
 }
 
 /// Managed Tauri state holding the single SQLite connection and the

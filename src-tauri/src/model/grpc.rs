@@ -31,7 +31,6 @@ use serde::{Deserialize, Serialize};
 /// same way regardless of mode. No "Sent"/ack variant was needed for
 /// outbound streaming messages — see `engine::grpc::drive_streaming_call`'s
 /// doc comment for why an ack-on-send event isn't part of this protocol.
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GrpcEvent {
@@ -75,26 +74,61 @@ pub enum GrpcEvent {
     Closed,
 }
 
-/// An outbound gRPC call request from the UI. `method_full_name` is the
-/// slash-separated form `GrpcMessageBuilder.tsx`/`GrpcSchemaPicker.tsx`
-/// already use (`"package.Service/Method"` — see
+/// Arguments for the `grpc_connect` command: everything needed to build a
+/// `DescriptorPool`, open the connection, and drive the first request.
+///
+/// `method_full_name` is the slash-separated form `GrpcMessageBuilder.tsx`/
+/// `GrpcSchemaPicker.tsx` already use (`"package.Service/Method"` — see
 /// `src/features/streaming/grpcSchemaTypes.ts`'s `GrpcMethodDescriptor.
 /// fullName`), not `prost_reflect`'s dot-separated
-/// `MethodDescriptor::full_name()` form. This single field doubles as the
-/// HTTP/2 request path once a leading `/` is added (`grpc_request_path`
-/// below) — no separate "path" field is needed.
+/// `MethodDescriptor::full_name()` form. This doubles as the HTTP/2 request
+/// path once a leading `/` is added (`grpc_request_path` below).
 ///
 /// `request` is the request message's fields as a JSON object, matching the
 /// shape `GrpcMessageBuilder`'s `onSend` callback produces (currently a JSON
-/// *string* there, per its mock IPC in `grpcMessageIpc.ts` — #34/17d-8 decides
-/// whether the Tauri command parses that string or the frontend is changed to
-/// invoke with a parsed object; `serde_json::Value` here is the natural Rust
-/// shape either way).
-#[allow(dead_code)] // caller lands in #29 (Tauri command wiring)
+/// *string* there, per its mock IPC in `grpcMessageIpc.ts`; the frontend's
+/// real `grpcConnect` IPC wrapper parses that string into an object before
+/// invoking, same as `serde_json::Value` expects here).
+///
+/// `proto_files`/`entry_point` are how this command sources a
+/// `DescriptorPool` *today*: schema discovery (reflection or proto-upload,
+/// #33) hasn't landed yet — `grpcSchemaIpc.ts` is still fully mocked, and
+/// `AppState` has no descriptor-pool cache a connect could reference by id —
+/// so `grpc_connect` compiles a pool itself, the same way
+/// `engine::grpc::schema::compile_proto_set`'s own tests do: a small
+/// in-memory file set (`path -> source text`) plus which file is the entry
+/// point. This is a real, if temporary, scope boundary: connecting against a
+/// schema discovered via live server reflection isn't possible until #33
+/// adds that discovery command and a way to hand its resulting pool (or the
+/// raw `FileDescriptorProto`s behind it) to `grpc_connect` instead of/in
+/// addition to inline proto source. `proto_files` uses the same shape as
+/// `engine::grpc::schema::ProtoFileSet` (a `BTreeMap`, but plain
+/// `HashMap`-shaped JSON crosses IPC the same way either type serializes).
+///
+/// The streaming mode (unary vs. client/server-streaming vs. bidi) is
+/// deliberately *not* a field here: once the method descriptor is resolved
+/// from the pool, `MethodDescriptor::is_client_streaming()`/
+/// `is_server_streaming()` give it directly — passing a redundant mode flag
+/// would just create a way for the frontend and the schema to disagree.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcConnectArgs {
+    pub url: String,
+    pub method_full_name: String,
+    pub request: serde_json::Value,
+    pub proto_files: std::collections::BTreeMap<String, String>,
+    pub entry_point: String,
+}
+
+/// An outbound request message sent on an already-open client-streaming/bidi
+/// gRPC connection, via the `grpc_send` command. No `method_full_name`
+/// field, unlike an early sketch of this type might suggest — a connection
+/// is already bound to one method for its whole lifetime (set once at
+/// `grpc_connect`), so repeating it on every subsequent send would be
+/// redundant and could only ever disagree with the connection it's sent on.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GrpcOutbound {
-    pub method_full_name: String,
     pub request: serde_json::Value,
 }
 
@@ -162,11 +196,29 @@ mod tests {
     #[test]
     fn grpc_outbound_deserializes_camel_case_fields() {
         let json = serde_json::json!({
-            "methodFullName": "example.Greeter/SayHello",
             "request": { "name": "world" }
         });
         let outbound: GrpcOutbound = serde_json::from_value(json).unwrap();
-        assert_eq!(outbound.method_full_name, "example.Greeter/SayHello");
         assert_eq!(outbound.request["name"], "world");
+    }
+
+    #[test]
+    fn grpc_connect_args_deserializes_camel_case_fields() {
+        let json = serde_json::json!({
+            "url": "grpc://example.com:50051",
+            "methodFullName": "example.Greeter/SayHello",
+            "request": { "name": "world" },
+            "protoFiles": { "greeter.proto": "syntax = \"proto3\";" },
+            "entryPoint": "greeter.proto"
+        });
+        let args: GrpcConnectArgs = serde_json::from_value(json).unwrap();
+        assert_eq!(args.url, "grpc://example.com:50051");
+        assert_eq!(args.method_full_name, "example.Greeter/SayHello");
+        assert_eq!(args.request["name"], "world");
+        assert_eq!(
+            args.proto_files.get("greeter.proto").map(String::as_str),
+            Some("syntax = \"proto3\";")
+        );
+        assert_eq!(args.entry_point, "greeter.proto");
     }
 }

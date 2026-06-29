@@ -16,6 +16,9 @@ import type {
   EnvironmentImportReport,
   EnvironmentPreview,
   ExportFormat,
+  GrpcConnectArgs,
+  GrpcEvent,
+  GrpcOutbound,
   HistoryEntry,
   HistoryFilter,
   ImportFormat,
@@ -225,6 +228,31 @@ export const ipc = {
   },
   wsSend: (connectionId: string, message: WsOutbound) =>
     invoke<void>("ws_send", { connectionId, message }),
+
+  // Streaming (gRPC, #17d)
+  grpcConnect: (
+    workspaceId: string,
+    args: GrpcConnectArgs,
+    onEvent: (event: GrpcEvent) => void,
+  ) => {
+    const channel = new Channel<GrpcEvent>();
+    channel.onmessage = onEvent;
+    return invoke<string>("grpc_connect", { channel, workspaceId, args });
+  },
+  // Sends another request message on a live client-streaming/bidi
+  // connection. Unary/server-streaming connections have nothing to send
+  // after the initial request — the backend rejects a grpcSend on those with
+  // a clean error rather than silently no-op-ing.
+  grpcSend: (connectionId: string, message: GrpcOutbound) =>
+    invoke<void>("grpc_send", { connectionId, message }),
+  // Half-closes the request side of a live client-streaming/bidi connection
+  // (no more request messages will be sent) without tearing the connection
+  // down — the server doesn't reply to a client-streaming call until the
+  // request side half-closes, so this is required for that mode to ever
+  // produce a response. Distinct from streamDisconnect, which aborts the
+  // connection outright and would lose that response.
+  grpcFinishSending: (connectionId: string) =>
+    invoke<void>("grpc_finish_sending", { connectionId }),
 
   // Disconnect any live stream (SSE/WS/gRPC) — one generic backend command.
   streamDisconnect: (connectionId: string) =>

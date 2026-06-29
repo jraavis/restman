@@ -99,7 +99,6 @@ fn webpki_client_config() -> Arc<ClientConfig> {
 /// connect-then-let-the-caller-drive shape — `connect()` only stands up the
 /// session; sending a request and reading frames/trailers back are separate
 /// calls made later by the unary/streaming RPC drive loop (#28).
-#[allow(dead_code)] // callers land in #28 (unary/streaming RPC drive loop)
 pub(crate) struct GrpcTransport {
     send_request: SendRequest<Bytes>,
     authority: String,
@@ -120,7 +119,6 @@ pub(crate) struct GrpcTransport {
 /// server reads the whole request body before sending response headers, so
 /// awaiting the response inside `send()` itself — before the caller has had
 /// a chance to call `send_frame` — would deadlock both sides.
-#[allow(dead_code)] // callers land in #28 (unary/streaming RPC drive loop)
 pub(crate) struct GrpcStream {
     send_stream: SendStream<Bytes>,
     response: ResponseState,
@@ -149,8 +147,41 @@ impl GrpcTransport {
     /// connection driver (`h2::client::Connection`) is spawned onto the
     /// runtime immediately, same as h2's own usage convention — nothing flows
     /// over the session otherwise.
-    #[allow(dead_code)] // callers land in #28 (unary/streaming RPC drive loop)
-    pub(crate) async fn connect(url: &str) -> Result<Self, AppError> {
+    ///
+    /// `transport` is the same `engine::http::TransportOverrides` that
+    /// `engine::ws::connect`/SSE/HTTP honor for proxy/client-cert settings —
+    /// but unlike those (which upgrade *through* a reqwest `Client` and so
+    /// inherit reqwest's proxy/TLS handling for free), this client speaks raw
+    /// h2 over a hand-rolled `tokio-rustls` session (see this module's own
+    /// doc comment for why: reqwest can't see HTTP/2 trailers). That means
+    /// none of `TransportOverrides`' fields can actually be honored here yet:
+    /// `proxy_url` would need a hand-written HTTP `CONNECT` tunnel before the
+    /// TLS handshake even starts, and `client_identity` is an opaque
+    /// `reqwest::Identity` with no path to a rustls `ClientConfig` (it would
+    /// need raw PEM/DER material from workspace settings instead). Both are
+    /// real follow-up features, not wiring. Rather than silently bypassing a
+    /// configured proxy or client cert — which would be both a likely
+    /// connection failure behind a corporate proxy *and* an unexpected
+    /// direct-connect/data-egress surprise for mTLS users — a configured-but-
+    /// unsupported setting is a clean upfront `AppError`, never a silent
+    /// no-op.
+    pub(crate) async fn connect(
+        url: &str,
+        transport: Option<&crate::engine::http::TransportOverrides>,
+    ) -> Result<Self, AppError> {
+        if let Some(t) = transport {
+            if t.proxy_url.as_deref().is_some_and(|p| !p.trim().is_empty()) {
+                return Err(AppError::Other(
+                    "gRPC connections do not yet honor the workspace proxy setting; configure a direct grpc(s):// target or clear the workspace proxy".into(),
+                ));
+            }
+            if t.client_identity.is_some() {
+                return Err(AppError::Other(
+                    "gRPC connections do not yet honor the workspace client-certificate setting".into(),
+                ));
+            }
+        }
+
         let target = parse_target(url)?;
         let authority = format!("{}:{}", target.host, target.port);
         let tcp = TcpStream::connect(&authority)
@@ -222,7 +253,6 @@ impl GrpcTransport {
     /// message is a body frame on this stream, sent via the returned
     /// `GrpcStream::send_frame`). The response is *not* awaited here — see
     /// `GrpcStream`'s doc comment for why that would deadlock.
-    #[allow(dead_code)] // callers land in #28 (unary/streaming RPC drive loop)
     pub(crate) async fn send(&mut self, path: &str) -> Result<GrpcStream, AppError> {
         let scheme = if self.tls { "https" } else { "http" };
         let uri = format!("{scheme}://{}{path}", self.authority);
@@ -263,7 +293,6 @@ impl GrpcStream {
     /// `true` for a unary request's only message (or a client-stream's final
     /// message); gRPC clients never send trailers of their own, so ending the
     /// stream is purely a data-frame flag, not a `send_trailers` call.
-    #[allow(dead_code)] // callers land in #28 (unary/streaming RPC drive loop)
     pub(crate) fn send_frame(&mut self, payload: &[u8], end_of_stream: bool) -> Result<(), AppError> {
         let framed = frame(payload);
         self.send_stream
@@ -282,7 +311,6 @@ impl GrpcStream {
     /// sending — `send_frame`'s own `end_of_stream` flag only covers the
     /// "last message IS the final frame" case; this covers "no more
     /// messages, full stop" after the fact.
-    #[allow(dead_code)] // caller lands in #31 (streaming RPC drive loop)
     pub(crate) fn half_close(&mut self) -> Result<(), AppError> {
         self.send_stream
             .send_data(Bytes::new(), true)
@@ -294,7 +322,6 @@ impl GrpcStream {
     /// the gRPC status, which rides in trailers — see `recv_trailers`. A
     /// non-200 here means the request never reached gRPC semantics at all
     /// (e.g. a proxy/load-balancer error).
-    #[allow(dead_code)] // callers land in #28 (unary/streaming RPC drive loop)
     pub(crate) async fn http_status(&mut self) -> Result<StatusCode, AppError> {
         self.resolve_response().await?;
         match &self.response {
@@ -316,7 +343,6 @@ impl GrpcStream {
     /// OK either way, which would hide a real RPC failure (#28's 17d-6 report
     /// flagged exactly this gap, deferred until this module was editable
     /// again in 17d-7).
-    #[allow(dead_code)] // callers land in #31 (streaming RPC drive loop)
     pub(crate) async fn response_headers(&mut self) -> Result<&HeaderMap, AppError> {
         self.resolve_response().await?;
         match &self.response {
@@ -369,7 +395,6 @@ impl GrpcStream {
     /// frames as they arrive (they don't align to gRPC message boundaries).
     /// Returns `Ok(None)` once the response body is exhausted (the caller
     /// should then read trailers via `recv_trailers`).
-    #[allow(dead_code)] // callers land in #28 (unary/streaming RPC drive loop)
     pub(crate) async fn recv_frame(&mut self) -> Result<Option<Vec<u8>>, AppError> {
         self.resolve_response().await?;
         loop {
@@ -403,7 +428,6 @@ impl GrpcStream {
     /// which has no API surface for HTTP/2 trailers. Should be called after
     /// `recv_frame` has returned `Ok(None)` (end of the data stream);
     /// returns `Ok(None)` if the peer closed without sending trailers at all.
-    #[allow(dead_code)] // callers land in #28 (unary/streaming RPC drive loop)
     pub(crate) async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, AppError> {
         self.resolve_response().await?;
         let body = match &mut self.response {
@@ -841,5 +865,72 @@ mod tests {
     #[test]
     fn rejects_missing_host() {
         assert!(parse_target("grpc://").is_err());
+    }
+
+    // --- connect()'s unsupported-transport-setting guard (no network) -----
+    //
+    // These prove the guard fires *before* any TCP connect is attempted —
+    // no loopback server needed, since a configured proxy/client-cert
+    // setting must error immediately, not after a failed/successful dial.
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn connect_rejects_configured_proxy_explicitly() {
+        let overrides = crate::engine::http::TransportOverrides {
+            proxy_url: Some("http://proxy.example:8080".to_string()),
+            ..Default::default()
+        };
+        let result = GrpcTransport::connect("grpc://127.0.0.1:1", Some(&overrides)).await;
+        let err = match result {
+            Ok(_) => panic!("a configured proxy must be rejected, never silently bypassed"),
+            Err(e) => e,
+        };
+        assert!(err.to_string().contains("proxy"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn connect_rejects_configured_client_identity_explicitly() {
+        // A real reqwest::Identity needs valid PEM/PKCS12 bytes to construct,
+        // which this test doesn't need — only that *some* Some(_) is present
+        // triggers the guard, so build one from a minimal but well-formed
+        // self-signed cert+key pair (rcgen, same dev-only dependency the
+        // loopback tests above already use).
+        let params = rcgen::CertificateParams::new(vec!["localhost".to_string()])
+            .expect("rcgen: subject alt names");
+        let key_pair = rcgen::KeyPair::generate().expect("rcgen: generate keypair");
+        let cert = params
+            .self_signed(&key_pair)
+            .expect("rcgen: self-signed cert");
+        let pem = format!("{}{}", cert.pem(), key_pair.serialize_pem());
+        let identity = reqwest::Identity::from_pem(pem.as_bytes())
+            .expect("rcgen-issued cert+key should form a valid reqwest::Identity");
+
+        let overrides = crate::engine::http::TransportOverrides {
+            client_identity: Some(identity),
+            ..Default::default()
+        };
+        let result = GrpcTransport::connect("grpc://127.0.0.1:1", Some(&overrides)).await;
+        let err = match result {
+            Ok(_) => panic!("a configured client identity must be rejected, never silently bypassed"),
+            Err(e) => e,
+        };
+        assert!(err.to_string().contains("client-certificate"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn connect_with_no_overrides_does_not_hit_the_guard() {
+        // Sanity check the guard's negative case compiles/behaves: passing
+        // None must reach the real connect attempt (and fail there, on a
+        // refused loopback port, rather than on the guard).
+        let result = GrpcTransport::connect("grpc://127.0.0.1:1", None).await;
+        let err = match result {
+            Ok(_) => panic!(
+                "connecting to an unused loopback port should fail at the dial, not the guard"
+            ),
+            Err(e) => e,
+        };
+        assert!(
+            !err.to_string().contains("does not yet honor"),
+            "with no overrides at all, the guard must not fire"
+        );
     }
 }

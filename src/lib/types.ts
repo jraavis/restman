@@ -539,3 +539,55 @@ export interface WsOutbound {
   binary: boolean;
   data: string;
 }
+
+// ---------------------------------------------------------------------------
+// Streaming (Phase 6, #17d) — mirrors `model::grpc::{GrpcEvent, GrpcConnectArgs, GrpcOutbound}`
+// ---------------------------------------------------------------------------
+
+/**
+ * Tagged by `type` — matches serde's `tag = "type"` on `GrpcEvent`. Both
+ * `call_unary` and `drive_streaming_call` emit this same enum regardless of
+ * RPC mode: `Response` fires once for unary/client-streaming and once per
+ * server message for server-streaming/bidi; `Status`/`Closed` always end the
+ * call the same way. `message`'s payload type is `unknown` rather than a
+ * concrete shape — it's a decoded protobuf message converted to JSON via
+ * `prost-reflect`'s dynamic `serde` support, so its fields depend entirely
+ * on whichever method's schema this connection was opened against.
+ */
+export type GrpcEvent =
+  | { type: "open" }
+  | { type: "response"; message: unknown }
+  | { type: "status"; code: number; message: string | null }
+  | { type: "error"; message: string }
+  | { type: "closed" };
+
+/**
+ * Arguments for `grpcConnect`. `protoFiles` is a `path -> source text` map
+ * (mirrors `engine::grpc::schema::ProtoFileSet`) compiled into a
+ * `DescriptorPool` server-side — schema discovery via live server reflection
+ * (#33) hasn't landed yet, so this is how a pool is sourced today; passing
+ * the schema's already-discovered proto source (e.g. from `GrpcSchemaPicker`'s
+ * proto-upload mode) here is the bridge until #33 adds a discovery-to-connect
+ * handoff that doesn't require re-sending source text. `methodFullName` is
+ * the same slash-separated `"package.Service/Method"` form used throughout
+ * this feature (see `GrpcMethodDescriptor.fullName` in `grpcSchemaTypes.ts`).
+ * There is no streaming-mode field — the backend derives unary vs.
+ * client/server-streaming vs. bidi from the compiled schema itself, so it
+ * can never disagree with what `protoFiles`/`entryPoint` actually describe.
+ */
+export interface GrpcConnectArgs {
+  url: string;
+  methodFullName: string;
+  request: unknown;
+  protoFiles: Record<string, string>;
+  entryPoint: string;
+}
+
+/**
+ * Outbound request message for `grpcSend`, sent on an already-open
+ * client-streaming/bidi connection. No `methodFullName` — a connection is
+ * bound to one method for its lifetime, set once at `grpcConnect`.
+ */
+export interface GrpcOutbound {
+  request: unknown;
+}
