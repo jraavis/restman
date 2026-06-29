@@ -109,7 +109,7 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
         const preview = await ipc.previewEnvironmentImport(content);
         setStep({ phase: "env_preview", preview });
       } else {
-        const preview = await ipc.previewImport(format, content);
+        const preview = await ipc.previewImport(content, { format });
         setStep({ phase: "preview", preview });
       }
     } catch (e) {

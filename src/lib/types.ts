@@ -410,6 +410,50 @@ export type ImportFormat =
   | "http_file";
 export type ExportFormat = "postman" | "curl" | "open_api" | "har";
 
+// ---------------------------------------------------------------------------
+// Plugins (Phase 6 task 5) — mirrors `model::plugin::{Plugin, PluginInput, PluginKind}`
+// ---------------------------------------------------------------------------
+
+export type PluginKind = "codegen" | "import" | "export";
+
+export interface Plugin {
+  id: string;
+  workspaceId: string;
+  name: string;
+  kind: PluginKind;
+  /** Display label: language name for `codegen`, format name for `import`/`export`. */
+  languageLabel: string;
+  source: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PluginInput {
+  name: string;
+  kind: PluginKind;
+  languageLabel: string;
+  source: string;
+  enabled: boolean;
+}
+
+/** Starter source for a new plugin of `kind` — names the entry-point
+ * function the sandbox calls (see `plugins::runtime`), so a blank editor
+ * isn't a blank slate. */
+export const PLUGIN_SOURCE_TEMPLATES: Record<PluginKind, string> = {
+  codegen: 'function generate(request, options) {\n  return request.method + " " + request.url;\n}',
+  import: 'function parse(content) {\n  return { root: { name: "Imported", requests: [] }, warnings: [] };\n}',
+  export: 'function exportCollection(node) {\n  return JSON.stringify(node, null, 2);\n}',
+};
+
+export function emptyPluginInput(kind: PluginKind): PluginInput {
+  return { name: "", kind, languageLabel: "", source: PLUGIN_SOURCE_TEMPLATES[kind], enabled: true };
+}
+
+/** Mirrors `codegen::CodegenTarget` — the mutually exclusive native-language
+ * vs. plugin-id selector `generate_code` dispatches on. */
+export type CodegenTarget = { kind: "native"; language: CodeLanguage } | { kind: "plugin"; pluginId: string };
+
 export interface ImportStats {
   folders: number;
   requests: number;

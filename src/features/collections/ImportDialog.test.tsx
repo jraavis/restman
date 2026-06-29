@@ -80,7 +80,7 @@ describe("ImportDialog", () => {
     render(<ImportDialog workspaceId="ws-1" parentId={null} onClose={() => {}} />);
     pasteJson('{"info":{}}');
 
-    await waitFor(() => expect(ipc.previewImport).toHaveBeenCalledWith("postman", '{"info":{}}'));
+    await waitFor(() => expect(ipc.previewImport).toHaveBeenCalledWith('{"info":{}}', { format: "postman" }));
     expect(await screen.findByText("Pet Store")).toBeInTheDocument();
     expect(screen.getByText("List pets")).toBeInTheDocument();
     expect(screen.getByText("1 folders")).toBeInTheDocument();
@@ -145,7 +145,7 @@ describe("ImportDialog", () => {
     fireEvent.change(textarea, { target: { value: "openapi: 3.0.0" } });
     fireEvent.blur(textarea);
 
-    await waitFor(() => expect(ipc.previewImport).toHaveBeenCalledWith("open_api", "openapi: 3.0.0"));
+    await waitFor(() => expect(ipc.previewImport).toHaveBeenCalledWith("openapi: 3.0.0", { format: "open_api" }));
   });
 
   describe("environment mode", () => {

@@ -50,7 +50,7 @@ describe("CodeTab", () => {
       "ws-1",
       "col-1",
       "req-1",
-      "curl",
+      { kind: "native", language: "curl" },
       { includeAuth: true, includeHeaders: true },
     ));
     expect(await screen.findByTestId("monaco")).toHaveValue("curl -X GET 'https://a.test'");

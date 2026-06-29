@@ -134,7 +134,7 @@ export function CollectionNode({
   }
 
   async function exportAs(format: ExportFormat) {
-    const content = await ipc.exportCollection(collection.id, format);
+    const content = await ipc.exportCollection(collection.id, { format });
     const base = collection.name.replace(/\s+/g, "_");
     const path = await save({ defaultPath: exportFilename(format, base) });
     if (!path) return;
