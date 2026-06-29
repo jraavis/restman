@@ -24,6 +24,7 @@ import { textToBase64 } from "../../lib/encoding";
 import { defaultRequest } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
 import { defaultRequestAuth, type Collection, type ExportFormat } from "../../lib/types";
+import { usePlugins } from "../plugins/hooks";
 import { CollectionAuthDialog } from "./CollectionAuthDialog";
 import { CollectionRunner } from "./CollectionRunner";
 import { ImportDialog } from "./ImportDialog";
@@ -80,6 +81,7 @@ export function CollectionNode({
   const createRequest = useCreateRequest(workspaceId);
   const moveRequest = useMoveRequest();
   const { open } = useOpenRequest(workspaceId);
+  const { data: exportPlugins } = usePlugins(workspaceId, "export");
 
   const expanded = expandedIds.has(collection.id);
   const children = childrenOf(collections, collection.id, sortMode);
@@ -142,6 +144,18 @@ export function CollectionNode({
       await ipc.writeFileBytes(path, textToBase64(content));
     } catch (e) {
       console.error("failed to export collection:", e);
+    }
+  }
+
+  async function exportAsPlugin(pluginId: string) {
+    const content = await ipc.exportCollection(collection.id, { pluginId });
+    const base = collection.name.replace(/\s+/g, "_");
+    const path = await save({ defaultPath: `${base}.txt` });
+    if (!path) return;
+    try {
+      await ipc.writeFileBytes(path, textToBase64(content));
+    } catch (e) {
+      console.error("failed to export collection via plugin:", e);
     }
   }
 
@@ -329,6 +343,19 @@ export function CollectionNode({
               >
                 <Download size={12} /> Export to cURL…
               </button>
+              {(exportPlugins ?? []).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void exportAsPlugin(p.id);
+                  }}
+                  className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  <Download size={12} /> Export to {p.name}…
+                </button>
+              ))}
               <button
                 type="button"
                 onClick={() => {
