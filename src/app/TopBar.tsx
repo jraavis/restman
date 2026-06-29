@@ -3,7 +3,7 @@
 //! settings.
 
 import { useState } from "react";
-import { Cable, ChevronDown, Cookie, MoreHorizontal, PanelLeft, Pencil, Plus, Radio, Settings, Settings2, Trash2, Zap } from "lucide-react";
+import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Radio, Settings, Settings2, Trash2, Zap } from "lucide-react";
 import {
   useActiveWorkspace,
   useCreateWorkspace,
@@ -16,6 +16,7 @@ import { WorkspaceSettingsDialog } from "../features/workspaces/WorkspaceSetting
 import { CookieJarDialog } from "../features/cookies/CookieJarDialog";
 import { SsePanel } from "../features/streaming/SsePanel";
 import { WsPanel } from "../features/streaming/WsPanel";
+import { GrpcPanel } from "../features/streaming/GrpcPanel";
 import { EnvironmentSwitcher } from "../features/environments/EnvironmentSwitcher";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { useDismissable } from "../lib/useDismissable";
@@ -33,6 +34,7 @@ export function TopBar() {
   const [cookiesOpen, setCookiesOpen] = useState(false);
   const [streamingOpen, setStreamingOpen] = useState(false);
   const [wsOpen, setWsOpen] = useState(false);
+  const [grpcOpen, setGrpcOpen] = useState(false);
   const [wsSettingsOpen, setWsSettingsOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -197,6 +199,15 @@ export function TopBar() {
         </button>
         <button
           type="button"
+          disabled={!active}
+          onClick={() => setGrpcOpen(true)}
+          title="gRPC"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <Network size={16} />
+        </button>
+        <button
+          type="button"
           onClick={() => setSettingsOpen((o) => !o)}
           title="Appearance settings"
           aria-expanded={settingsOpen}
@@ -218,6 +229,9 @@ export function TopBar() {
       )}
       {wsOpen && active && (
         <WsPanel workspaceId={active.id} onClose={() => setWsOpen(false)} />
+      )}
+      {grpcOpen && active && (
+        <GrpcPanel workspaceId={active.id} onClose={() => setGrpcOpen(false)} />
       )}
       {wsSettingsOpen && active && (
         <WorkspaceSettingsDialog
