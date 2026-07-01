@@ -144,7 +144,7 @@ pub fn interpolate_request(req: &mut HttpRequest, vars: &HashMap<String, String>
                 }
             }
         }
-        RequestBody::Graphql { query, variables } => {
+        RequestBody::Graphql { query, variables, operation_name: _ } => {
             *query = interpolate(query, vars);
             if let Some(v) = variables {
                 *v = interpolate(v, vars);
@@ -200,7 +200,7 @@ pub fn redact_request(req: &HttpRequest, secrets: &HashSet<String>) -> HttpReque
                 }
             }
         }
-        RequestBody::Graphql { query, variables } => {
+        RequestBody::Graphql { query, variables, operation_name: _ } => {
             *query = redact(query, secrets);
             if let Some(v) = variables {
                 *v = redact(v, secrets);

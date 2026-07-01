@@ -29,7 +29,7 @@ export type RequestBody =
   | { mode: "urlEncoded"; data: KeyValue[] }
   | { mode: "formData"; data: FormField[] }
   | { mode: "binary"; data: { path: string } }
-  | { mode: "graphql"; data: { query: string; variables?: string | null } };
+  | { mode: "graphql"; data: { query: string; variables?: string | null; operationName?: string | null } };
 
 export type BodyMode = RequestBody["mode"];
 

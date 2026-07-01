@@ -257,11 +257,17 @@ pub(crate) fn plan_body(body: &RequestBody) -> BodyPlan {
             fields.iter().filter(|f| f.enabled).map(|f| (f.key.clone(), f.value.clone(), f.is_file)).collect(),
         ),
         RequestBody::Binary { path } => BodyPlan::Binary(path.clone()),
-        RequestBody::Graphql { query, variables } => {
-            let body = match variables {
-                Some(v) => format!("{{\"query\":{},\"variables\":{v}}}", json_string(query)),
-                None => format!("{{\"query\":{}}}", json_string(query)),
-            };
+        RequestBody::Graphql { query, variables, operation_name } => {
+            let mut parts = vec![format!("\"query\":{}", json_string(query))];
+            if let Some(v) = variables {
+                parts.push(format!("\"variables\":{v}"));
+            }
+            if let Some(name) = operation_name {
+                if !name.trim().is_empty() {
+                    parts.push(format!("\"operationName\":{}", json_string(name)));
+                }
+            }
+            let body = format!("{{{}}}", parts.join(","));
             BodyPlan::Text { content: body, content_type: Some("application/json") }
         }
     }

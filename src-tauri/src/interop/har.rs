@@ -357,11 +357,17 @@ fn build_post_data(body: &RequestBody) -> Value {
             }).collect::<Vec<_>>(),
         }),
         RequestBody::Binary { path } => json!({"mimeType": "application/octet-stream", "fileName": path}),
-        RequestBody::Graphql { query, variables } => {
-            let body = match variables {
-                Some(v) => format!("{{\"query\":{},\"variables\":{v}}}", serde_json::to_string(query).unwrap_or_default()),
-                None => format!("{{\"query\":{}}}", serde_json::to_string(query).unwrap_or_default()),
-            };
+        RequestBody::Graphql { query, variables, operation_name } => {
+            let mut parts = vec![format!("\"query\":{}", serde_json::to_string(query).unwrap_or_default())];
+            if let Some(v) = variables {
+                parts.push(format!("\"variables\":{v}"));
+            }
+            if let Some(name) = operation_name {
+                if !name.trim().is_empty() {
+                    parts.push(format!("\"operationName\":{}", serde_json::to_string(name).unwrap_or_default()));
+                }
+            }
+            let body = format!("{{{}}}", parts.join(","));
             json!({"mimeType": "application/json", "text": body})
         }
     }

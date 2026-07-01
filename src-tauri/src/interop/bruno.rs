@@ -272,7 +272,7 @@ fn parse_body_section(section: &str, headers: &[HeaderEntry], warnings: &mut Vec
         if let Some(rest) = line.strip_prefix("graphql:") {
             let query = rest.trim().to_string();
             // Bruno separates query/variables with newlines; we keep just the query on this line.
-            return RequestBody::Graphql { query, variables: None };
+            return RequestBody::Graphql { query, variables: None, operation_name: None };
         }
     }
     let _ = (headers, warnings);
