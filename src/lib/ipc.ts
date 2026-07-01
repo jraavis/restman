@@ -281,6 +281,15 @@ export const ipc = {
     options: CodegenOptions,
   ) => invoke<string>("generate_code", { req, workspaceId, collectionId, requestId, target, options }),
 
+  // GraphQL schema introspection — a genuine live fetch (real auth/transport),
+  // but not a `send_request` call: skips scripts/history, see commands/graphql.rs.
+  introspectGraphqlSchema: (
+    req: HttpRequest,
+    workspaceId: string,
+    collectionId: string | null,
+    requestId: string | null,
+  ) => invoke<string>("introspect_graphql_schema", { req, workspaceId, collectionId, requestId }),
+
   // Plugins (Phase 6 task 5) — JS plugins, sandbox-executed via `plugins::runtime`.
   listPlugins: (workspaceId: string, kind?: PluginKind | null) =>
     invoke<Plugin[]>("list_plugins", { workspaceId, kind: kind ?? null }),
