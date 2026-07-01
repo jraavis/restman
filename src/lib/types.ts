@@ -635,3 +635,47 @@ export interface GrpcConnectArgs {
 export interface GrpcOutbound {
   request: unknown;
 }
+
+// ---------------------------------------------------------------------------
+// Mock servers — mirrors `model::mock::{MockServer, MockServerInput, MockRule,
+// MockRuleInput}`. Running state (is this one currently serving, and on what
+// port) isn't part of the config row — see `listRunningMockServerIds`.
+// ---------------------------------------------------------------------------
+
+export interface MockServer {
+  id: string;
+  workspaceId: string;
+  name: string;
+  port: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MockServerInput {
+  name: string;
+  port: number;
+}
+
+/** `method: null` matches any method. `pathPattern` supports `:name`
+ * segments matching any single path segment (e.g. `/users/:id`). */
+export interface MockRule {
+  id: string;
+  mockServerId: string;
+  method: string | null;
+  pathPattern: string;
+  status: number;
+  headers: HeaderEntry[];
+  body: string;
+  delayMs: number;
+  sortOrder: number;
+}
+
+export interface MockRuleInput {
+  method: string | null;
+  pathPattern: string;
+  status: number;
+  headers: HeaderEntry[];
+  body: string;
+  delayMs: number;
+  sortOrder: number;
+}
