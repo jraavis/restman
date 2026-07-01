@@ -64,6 +64,14 @@ rustls-pemfile = "2"
 webpki-roots = "0.26"
 bytes = "1"
 http = "1"
+# Mock servers (Phase 7): axum is tokio-native, so it shares this crate's
+# existing tokio runtime instead of pulling a second one. Confirmed via
+# `cargo tree -p hyper`/`-p h2` before adding: axum 0.8's hyper 1.x is the
+# exact same resolved version reqwest/gRPC already pull in — no duplicate
+# TLS/HTTP stack. Minimal features: mock routes are matched against
+# DB-stored rule patterns at runtime (not axum's typed path/query
+# extractors), so only json/tokio/http1 are needed.
+axum = { version = "0.8.9", default-features = false, features = ["json", "tokio", "http1"] }
 
 [dev-dependencies]
 url = "2"

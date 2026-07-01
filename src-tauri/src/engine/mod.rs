@@ -3,5 +3,7 @@
 
 pub mod http;
 pub(crate) mod grpc;
+#[cfg(test)]
+mod mock;
 pub mod sse;
 pub mod ws;
