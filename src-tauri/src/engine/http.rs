@@ -231,14 +231,8 @@ fn apply_body(
             let data = std::fs::read(path)?;
             set_ct(builder, "application/octet-stream").body(data)
         }
-        RequestBody::Graphql { query, variables } => {
-            let vars: serde_json::Value = match variables {
-                Some(v) if !v.trim().is_empty() => {
-                    serde_json::from_str(v).map_err(|e| AppError::Other(format!("invalid GraphQL variables JSON: {e}")))?
-                }
-                _ => serde_json::Value::Null,
-            };
-            let payload = serde_json::json!({ "query": query, "variables": vars });
+        RequestBody::Graphql { query, variables, operation_name } => {
+            let payload = graphql_payload(query, variables, operation_name)?;
             set_ct(builder, "application/json").body(payload.to_string())
         }
     })
@@ -328,15 +322,33 @@ fn body_bytes_for_signing(body: &RequestBody) -> AppResult<Vec<u8>> {
         }
         RequestBody::FormData(_) => Vec::new(),
         RequestBody::Binary { path } => std::fs::read(path)?,
-        RequestBody::Graphql { query, variables } => {
-            let vars: serde_json::Value = match variables {
-                Some(v) if !v.trim().is_empty() => serde_json::from_str(v)
-                    .map_err(|e| AppError::Other(format!("invalid GraphQL variables JSON: {e}")))?,
-                _ => serde_json::Value::Null,
-            };
-            serde_json::json!({ "query": query, "variables": vars }).to_string().into_bytes()
+        RequestBody::Graphql { query, variables, operation_name } => {
+            graphql_payload(query, variables, operation_name)?.to_string().into_bytes()
         }
     })
+}
+
+/// Builds the standard `{ query, variables, operationName }` GraphQL POST envelope.
+/// `operationName` is omitted from the JSON entirely when absent (not sent as
+/// `null`) since some servers reject an explicit `null` for a field they expect
+/// to be either a string or missing.
+fn graphql_payload(
+    query: &str,
+    variables: &Option<String>,
+    operation_name: &Option<String>,
+) -> AppResult<serde_json::Value> {
+    let vars: serde_json::Value = match variables {
+        Some(v) if !v.trim().is_empty() => serde_json::from_str(v)
+            .map_err(|e| AppError::Other(format!("invalid GraphQL variables JSON: {e}")))?,
+        _ => serde_json::Value::Null,
+    };
+    let mut payload = serde_json::json!({ "query": query, "variables": vars });
+    if let Some(name) = operation_name {
+        if !name.trim().is_empty() {
+            payload["operationName"] = serde_json::Value::String(name.clone());
+        }
+    }
+    Ok(payload)
 }
 
 fn file_name_of(path: &str) -> String {
@@ -606,5 +618,32 @@ mod tests {
         let body = decode(&resp);
         assert!(body.contains("restman"));
         assert!(body.contains("application/json"));
+    }
+
+    #[test]
+    fn graphql_payload_omits_operation_name_when_absent() {
+        let payload = graphql_payload("{ pets { id } }", &None, &None).unwrap();
+        assert_eq!(payload, serde_json::json!({"query": "{ pets { id } }", "variables": null}));
+    }
+
+    #[test]
+    fn graphql_payload_omits_operation_name_when_blank() {
+        let payload = graphql_payload("{ pets { id } }", &None, &Some("   ".into())).unwrap();
+        assert!(payload.get("operationName").is_none());
+    }
+
+    #[test]
+    fn graphql_payload_includes_operation_name_and_parsed_variables() {
+        let payload =
+            graphql_payload("query Pets($id: ID) { pet(id: $id) { name } }", &Some("{\"id\":\"1\"}".into()), &Some("Pets".into()))
+                .unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "query": "query Pets($id: ID) { pet(id: $id) { name } }",
+                "variables": {"id": "1"},
+                "operationName": "Pets",
+            })
+        );
     }
 }

@@ -410,14 +410,20 @@ fn build_curl_block(req: &ImportedRequest) -> String {
         RequestBody::Binary { path } => {
             lines.push(format!("  --data-binary {}", quote(&format!("@{path}"))));
         }
-        RequestBody::Graphql { query, variables } => {
+        RequestBody::Graphql { query, variables, operation_name } => {
             if !has_content_type(&headers) {
                 lines.push(format!("  -H {}", quote("Content-Type: application/json")));
             }
-            let body = match variables {
-                Some(v) => format!("{{\"query\":{},\"variables\":{v}}}", json_string(query)),
-                None => format!("{{\"query\":{}}}", json_string(query)),
-            };
+            let mut parts = vec![format!("\"query\":{}", json_string(query))];
+            if let Some(v) = variables {
+                parts.push(format!("\"variables\":{v}"));
+            }
+            if let Some(name) = operation_name {
+                if !name.trim().is_empty() {
+                    parts.push(format!("\"operationName\":{}", json_string(name)));
+                }
+            }
+            let body = format!("{{{}}}", parts.join(","));
             lines.push(format!("  --data-raw {}", quote(&body)));
         }
     }

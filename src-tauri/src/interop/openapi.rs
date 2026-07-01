@@ -936,12 +936,17 @@ fn build_request_body_json(body: &RequestBody) -> Option<Value> {
             json!({"multipart/form-data": {"schema": {"type": "object", "properties": props}}})
         }
         RequestBody::Binary { .. } => json!({"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}),
-        RequestBody::Graphql { query, variables } => {
+        RequestBody::Graphql { query, variables, operation_name } => {
             let mut obj = serde_json::Map::new();
             obj.insert("query".into(), Value::String(query.clone()));
             if let Some(v) = variables {
                 if let Ok(parsed) = serde_json::from_str::<Value>(v) {
                     obj.insert("variables".into(), parsed);
+                }
+            }
+            if let Some(name) = operation_name {
+                if !name.trim().is_empty() {
+                    obj.insert("operationName".into(), Value::String(name.clone()));
                 }
             }
             json!({"application/json": {"schema": {"type": "object"}, "example": Value::Object(obj)}})

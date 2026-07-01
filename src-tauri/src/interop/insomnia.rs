@@ -224,7 +224,8 @@ fn parse_body(v: Option<&Value>, headers: &[HeaderEntry], warnings: &mut Vec<Str
             Value::String(s) => s.clone(),
             other => other.to_string(),
         });
-        return RequestBody::Graphql { query, variables };
+        let operation_name = parsed.get("operationName").and_then(Value::as_str).map(str::to_string);
+        return RequestBody::Graphql { query, variables, operation_name };
     }
     if let Some(text) = body.get("text").and_then(Value::as_str) {
         let language = mime.split('/').nth(1).map(str::to_string);

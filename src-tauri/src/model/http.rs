@@ -66,6 +66,8 @@ pub enum RequestBody {
         query: String,
         #[serde(default)]
         variables: Option<String>,
+        #[serde(default)]
+        operation_name: Option<String>,
     },
 }
 

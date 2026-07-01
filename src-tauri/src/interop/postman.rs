@@ -183,7 +183,8 @@ fn parse_body(v: Option<&Value>, warnings: &mut Vec<String>) -> RequestBody {
             let g = v.get("graphql");
             let query = g.and_then(|g| g.get("query")).and_then(Value::as_str).unwrap_or_default().to_string();
             let variables = g.and_then(|g| g.get("variables")).and_then(Value::as_str).map(str::to_string);
-            RequestBody::Graphql { query, variables }
+            // Postman v2.1's `graphql` body mode has no `operationName` field.
+            RequestBody::Graphql { query, variables, operation_name: None }
         }
         "file" => RequestBody::Binary {
             path: v.get("file").and_then(|f| f.get("src")).and_then(Value::as_str).unwrap_or_default().to_string(),
@@ -434,7 +435,10 @@ fn build_body_json(body: &RequestBody) -> Value {
             "formdata": list.iter().map(build_form_field_json).collect::<Vec<_>>(),
         }),
         RequestBody::Binary { path } => json!({"mode": "file", "file": {"src": path}}),
-        RequestBody::Graphql { query, variables } => {
+        // Postman v2.1's `graphql` body mode has no `operationName` field —
+        // dropped silently on export, same format-inherent-gap convention as
+        // AWS SigV4 (see codegen/mod.rs's export dispatch).
+        RequestBody::Graphql { query, variables, operation_name: _ } => {
             let mut g = serde_json::Map::new();
             g.insert("query".into(), Value::String(query.clone()));
             if let Some(v) = variables {
@@ -699,7 +703,11 @@ mod tests {
         let graphql = preview.root.requests.iter().find(|r| r.name == "Pet graphql").unwrap();
         assert_eq!(
             graphql.body,
-            RequestBody::Graphql { query: "query { pets { id name } }".into(), variables: Some("{}".into()) }
+            RequestBody::Graphql {
+                query: "query { pets { id name } }".into(),
+                variables: Some("{}".into()),
+                operation_name: None,
+            }
         );
 
         assert!(preview.warnings.iter().any(|w| w.contains("variable")));
