@@ -223,6 +223,40 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_plugins_workspace ON plugins(workspace_id);
     "#,
+    // v7 — local mock servers. Workspace-scoped, many rows per workspace
+    // (same shape as plugins), each server owning an ordered list of rules
+    // matched method+path -> canned response. `port` is user-configured and
+    // fixed (unlike the engine's test spike, which binds an OS-assigned port
+    // purely to avoid test-to-test collisions) — a mock server is only
+    // useful if it answers on a predictable address the user can point a
+    // client at. Running state (the live socket/task) is ephemeral and lives
+    // in `AppState.mock_servers`, not here — restarting the app never
+    // auto-starts a server, same manual-control posture as the SSE/WS/gRPC
+    // panels.
+    r#"
+    CREATE TABLE mock_servers (
+        id           TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        name         TEXT NOT NULL,
+        port         INTEGER NOT NULL,
+        created_at   INTEGER NOT NULL,
+        updated_at   INTEGER NOT NULL
+    );
+    CREATE INDEX idx_mock_servers_workspace ON mock_servers(workspace_id);
+
+    CREATE TABLE mock_rules (
+        id             TEXT PRIMARY KEY,
+        mock_server_id TEXT NOT NULL REFERENCES mock_servers(id) ON DELETE CASCADE,
+        method         TEXT,
+        path_pattern   TEXT NOT NULL,
+        status         INTEGER NOT NULL DEFAULT 200,
+        headers_json   TEXT NOT NULL DEFAULT '[]',
+        body           TEXT NOT NULL DEFAULT '',
+        delay_ms       INTEGER NOT NULL DEFAULT 0,
+        sort_order     INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_mock_rules_server ON mock_rules(mock_server_id);
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.
