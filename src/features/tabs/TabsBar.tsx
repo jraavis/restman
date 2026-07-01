@@ -10,6 +10,7 @@ import { methodBadgeClasses } from "../../lib/methods";
 import type { Tab } from "../../lib/types";
 import { useDismissable } from "../../lib/useDismissable";
 import { useRequestStore } from "../../stores/requestStore";
+import { useUiStore } from "../../stores/uiStore";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import {
   useCloseAllTabs,
@@ -30,6 +31,7 @@ export function TabsBar() {
   const storeActiveTabId = useRequestStore((s) => s.activeTabId);
   const title = useRequestStore((s) => s.title);
   const request = useRequestStore((s) => s.request);
+  const defaultRequestOptions = useUiStore((s) => s.defaultRequestOptions);
 
   const createTab = useCreateTab(workspaceId);
   const setActiveTab = useSetActiveTab(workspaceId);
@@ -80,7 +82,7 @@ export function TabsBar() {
         },
       ]),
     ),
-    "tab.new": () => createTab.mutate({ requestId: null, title: "Untitled", draft: defaultRequest() }),
+    "tab.new": () => createTab.mutate({ requestId: null, title: "Untitled", draft: defaultRequest(defaultRequestOptions) }),
   });
 
   const dragIndex = useRef<number | null>(null);
@@ -131,7 +133,7 @@ export function TabsBar() {
       <button
         type="button"
         title="New tab"
-        onClick={() => createTab.mutate({ requestId: null, title: "Untitled", draft: defaultRequest() })}
+        onClick={() => createTab.mutate({ requestId: null, title: "Untitled", draft: defaultRequest(defaultRequestOptions) })}
         className="flex shrink-0 items-center px-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
       >
         <Plus size={15} />

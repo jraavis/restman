@@ -21,6 +21,8 @@ export type CodeEditorProps = Omit<EditorProps, "theme"> & {
 export function CodeEditor({ options, variableKeys, graphqlSchema, ...props }: CodeEditorProps) {
   const isDark = useIsDark();
   const fontSize = useUiStore((s) => s.editorFontSize);
+  const wordWrap = useUiStore((s) => s.editorWordWrap);
+  const tabSize = useUiStore((s) => s.editorTabSize);
 
   useEffect(() => {
     ensureVariableCompletionRegistered();
@@ -35,7 +37,7 @@ export function CodeEditor({ options, variableKeys, graphqlSchema, ...props }: C
   return (
     <Editor
       theme={isDark ? "vs-dark" : "light"}
-      options={{ fontSize, ...options }}
+      options={{ fontSize, wordWrap: wordWrap ? "on" : "off", tabSize, ...options }}
       {...props}
     />
   );

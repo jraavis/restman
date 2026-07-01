@@ -105,7 +105,7 @@ export function extensionFor(contentType: string | null): string {
   return "txt";
 }
 
-export function defaultRequest(): HttpRequest {
+export function defaultRequest(optionOverrides?: Partial<RequestOptions>): HttpRequest {
   return {
     method: "GET",
     url: "",
@@ -118,6 +118,7 @@ export function defaultRequest(): HttpRequest {
       verifySsl: true,
       maxRedirects: 10,
       sendCookies: false,
+      ...optionOverrides,
     },
   };
 }

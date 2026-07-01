@@ -8,12 +8,14 @@ import { useEffect, useRef } from "react";
 import { defaultRequest } from "../../lib/http";
 import { defaultRequestAuth, type Tab } from "../../lib/types";
 import { useRequestStore } from "../../stores/requestStore";
+import { useUiStore } from "../../stores/uiStore";
 import { useRequest } from "../collections/hooks";
 import { useCreateTab, useTabs } from "./hooks";
 
 export function useTabSync(workspaceId: string | undefined) {
   const { data: tabs, isLoading } = useTabs(workspaceId);
   const createTab = useCreateTab(workspaceId);
+  const defaultRequestOptions = useUiStore((s) => s.defaultRequestOptions);
 
   // Tracks the workspace a bootstrap create is in flight (or just landed) for,
   // so the empty-tabs check below fires once per empty spell rather than once
@@ -28,8 +30,8 @@ export function useTabSync(workspaceId: string | undefined) {
     }
     if (bootstrappingFor.current === workspaceId || createTab.isPending) return;
     bootstrappingFor.current = workspaceId;
-    createTab.mutate({ requestId: null, title: "Untitled", draft: defaultRequest() });
-  }, [workspaceId, isLoading, tabs, createTab]);
+    createTab.mutate({ requestId: null, title: "Untitled", draft: defaultRequest(defaultRequestOptions) });
+  }, [workspaceId, isLoading, tabs, createTab, defaultRequestOptions]);
 
   const activeTab: Tab | null = tabs?.find((t) => t.isActive) ?? null;
   const { data: linkedRequest } = useRequest(activeTab?.requestId ?? undefined);

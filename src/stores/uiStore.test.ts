@@ -28,4 +28,30 @@ describe("uiStore", () => {
     useUiStore.getState().clearKeybindingOverride("request.save");
     expect(useUiStore.getState().keybindingOverrides["request.save"]).toBeUndefined();
   });
+
+  it("clamps editor tab size to [1, 8]", () => {
+    useUiStore.getState().setEditorTabSize(0);
+    expect(useUiStore.getState().editorTabSize).toBe(1);
+    useUiStore.getState().setEditorTabSize(99);
+    expect(useUiStore.getState().editorTabSize).toBe(8);
+  });
+
+  it("toggles editor word wrap", () => {
+    useUiStore.getState().setEditorWordWrap(true);
+    expect(useUiStore.getState().editorWordWrap).toBe(true);
+  });
+
+  it("sets confirmBeforeDelete", () => {
+    useUiStore.getState().setConfirmBeforeDelete(false);
+    expect(useUiStore.getState().confirmBeforeDelete).toBe(false);
+  });
+
+  it("sets default request options for new tabs", () => {
+    useUiStore.getState().setDefaultRequestOptions({ timeoutSecs: 60, followRedirects: false, verifySsl: false });
+    expect(useUiStore.getState().defaultRequestOptions).toEqual({
+      timeoutSecs: 60,
+      followRedirects: false,
+      verifySsl: false,
+    });
+  });
 });
