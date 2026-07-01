@@ -28,6 +28,10 @@ interface UiState {
   requestSplit: number;
   editorFontSize: number;
   activePanel: SidePanel;
+  /** User-remapped shortcuts, keyed by command id (see `lib/commands.ts`).
+   * Only holds entries that differ from a command's `defaultShortcut` — the
+   * Keybindings settings tab writes here, `commandForShortcut` reads it. */
+  keybindingOverrides: Record<string, string>;
   setTheme: (theme: Theme) => void;
   setAccent: (accent: Accent) => void;
   toggleSidebar: () => void;
@@ -35,6 +39,8 @@ interface UiState {
   setRequestSplit: (fraction: number) => void;
   setEditorFontSize: (size: number) => void;
   setActivePanel: (panel: SidePanel) => void;
+  setKeybindingOverride: (commandId: string, shortcut: string) => void;
+  clearKeybindingOverride: (commandId: string) => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -47,6 +53,7 @@ export const useUiStore = create<UiState>()(
       requestSplit: 0.45,
       editorFontSize: 13,
       activePanel: "collections",
+      keybindingOverrides: {},
       setTheme: (theme) => set({ theme }),
       setAccent: (accent) => set({ accent }),
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -54,6 +61,14 @@ export const useUiStore = create<UiState>()(
       setRequestSplit: (fraction) => set({ requestSplit: clamp(fraction, MIN_SPLIT, MAX_SPLIT) }),
       setEditorFontSize: (size) => set({ editorFontSize: clamp(size, MIN_FONT, MAX_FONT) }),
       setActivePanel: (activePanel) => set({ activePanel }),
+      setKeybindingOverride: (commandId, shortcut) =>
+        set((s) => ({ keybindingOverrides: { ...s.keybindingOverrides, [commandId]: shortcut } })),
+      clearKeybindingOverride: (commandId) =>
+        set((s) => {
+          const next = { ...s.keybindingOverrides };
+          delete next[commandId];
+          return { keybindingOverrides: next };
+        }),
     }),
     { name: "restman-ui" },
   ),

@@ -1,8 +1,9 @@
 //! Active-environment indicator + quick-switch popover, mounted in the
 //! TopBar. Cmd/Ctrl+E opens it, mirroring TabsBar's Cmd+1..9 shortcut.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
+import { useRegisterCommand } from "../../lib/commands";
 import { useDismissable } from "../../lib/useDismissable";
 import { useActiveEnvironment, useEnvironments, useSetActiveEnvironment } from "./hooks";
 import type { Environment } from "../../lib/types";
@@ -14,16 +15,7 @@ export function EnvironmentSwitcher({ workspaceId }: { workspaceId: string | und
   const [open, setOpen] = useState(false);
   const ref = useDismissable<HTMLDivElement>(() => setOpen(false));
 
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "e") {
-        e.preventDefault();
-        setOpen((o) => !o);
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useRegisterCommand("environment.switch", () => setOpen((o) => !o));
 
   const groups = new Map<string | null, Environment[]>();
   for (const env of environments ?? []) {
