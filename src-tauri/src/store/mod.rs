@@ -23,6 +23,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::engine::grpc::GrpcRequestMsg;
+use crate::engine::mock::RunningMockServer;
 
 /// The outbound-send half of a live streaming connection, when the protocol
 /// supports sending after connect at all. A plain `enum` rather than a
@@ -67,4 +68,10 @@ pub struct AppState {
     /// completion; `stream_disconnect` removes-and-aborts explicitly.
     /// `Arc` so the spawned task can self-remove without borrowing `AppState`.
     pub streams: Arc<Mutex<HashMap<String, StreamHandle>>>,
+    /// Live mock servers, keyed by the `mock_servers` DB row id (unlike
+    /// `streams`, a mock server is a persistent named config the user starts/
+    /// stops repeatedly, not a fresh ephemeral connection each time — the
+    /// stable DB id is the natural key, no separate connection id needed).
+    /// Never auto-started on launch; only `start_mock_server` populates this.
+    pub mock_servers: Mutex<HashMap<String, RunningMockServer>>,
 }

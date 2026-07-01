@@ -40,6 +40,7 @@ pub fn run() {
                 db: Mutex::new(conn),
                 cookie_jar,
                 streams: Arc::new(Mutex::new(std::collections::HashMap::new())),
+                mock_servers: Mutex::new(std::collections::HashMap::new()),
             });
             Ok(())
         })
@@ -132,6 +133,18 @@ pub fn run() {
             commands::preview_plugin_codegen,
             commands::preview_plugin_import,
             commands::preview_plugin_export,
+            commands::list_mock_servers,
+            commands::create_mock_server,
+            commands::create_mock_server_from_collection,
+            commands::update_mock_server,
+            commands::delete_mock_server,
+            commands::list_mock_rules,
+            commands::create_mock_rule,
+            commands::update_mock_rule,
+            commands::delete_mock_rule,
+            commands::start_mock_server,
+            commands::stop_mock_server,
+            commands::list_running_mock_server_ids,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
