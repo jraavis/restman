@@ -10,8 +10,9 @@ import { useRequestStore } from "../../stores/requestStore";
 import { useCollections } from "../collections/hooks";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import { useResolvedVariableKeys } from "../environments/hooks";
-import { BodyEditor } from "./BodyEditor";
+import { BodyEditor, type GraphqlBodyPanelState } from "./BodyEditor";
 import { CodeTab } from "./CodeTab";
+import { useGraphqlSchema } from "./graphqlSchemaHooks";
 import { KeyValueEditor, type Pair } from "./KeyValueEditor";
 import { RequestAuthTab } from "./RequestAuthTab";
 import { SaveRequestDialog } from "./SaveRequestDialog";
@@ -47,6 +48,16 @@ export function RequestBuilder() {
   const collectionId = useRequestStore((s) => s.collectionId);
   const requestId = useRequestStore((s) => s.requestId);
   const variableKeys = useResolvedVariableKeys(workspaceId, collectionId);
+
+  const graphqlSchema = useGraphqlSchema();
+  const graphqlPanelState: GraphqlBodyPanelState = {
+    status: graphqlSchema.status,
+    schema: graphqlSchema.schema,
+    error: graphqlSchema.error,
+    onFetchSchema: () => {
+      if (workspaceId) graphqlSchema.fetchSchema(request, workspaceId, collectionId, requestId);
+    },
+  };
 
   // Cmd/Ctrl+S: overwrite directly if already linked, otherwise prompt for a
   // name + collection. Mounted once; reads the latest save/isLinked through
@@ -196,7 +207,14 @@ export function RequestBuilder() {
             variableKeys={variableKeys}
           />
         )}
-        {tab === "body" && <BodyEditor body={request.body} onChange={setBody} variableKeys={variableKeys} />}
+        {tab === "body" && (
+          <BodyEditor
+            body={request.body}
+            onChange={setBody}
+            variableKeys={variableKeys}
+            graphqlSchemaState={graphqlPanelState}
+          />
+        )}
         {tab === "auth" && (
           <RequestAuthTab auth={auth} onChange={setAuth} collectionId={collectionId} requestId={requestId} />
         )}

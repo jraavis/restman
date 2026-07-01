@@ -1,6 +1,7 @@
 //! Request body editor covering all seven modes.
 
-import { Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { BookOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { LazyCodeEditor } from "../../components/LazyCodeEditor";
 import { VariableSuggestInput } from "../../components/VariableSuggestInput";
 import {
@@ -10,7 +11,20 @@ import {
   type KeyValue,
   type RequestBody,
 } from "../../lib/http";
+import type { GraphqlSchemaStatus } from "./graphqlSchemaHooks";
 import { KeyValueEditor, type Pair } from "./KeyValueEditor";
+import { LazyGraphqlDocsExplorer } from "./LazyGraphqlDocsExplorer";
+import type { GraphQLSchema } from "graphql";
+
+/** `BodyEditor` doesn't have workspace/collection/request context, so
+ * `RequestBuilder` (which does) binds `useGraphqlSchema()`'s `fetchSchema`
+ * down to a plain zero-arg trigger before passing it here. */
+export interface GraphqlBodyPanelState {
+  status: GraphqlSchemaStatus;
+  schema: GraphQLSchema | null;
+  error: string | null;
+  onFetchSchema: () => void;
+}
 
 const MODES: { id: BodyMode; label: string }[] = [
   { id: "none", label: "None" },
@@ -28,9 +42,13 @@ interface Props {
   body: RequestBody;
   onChange: (body: RequestBody) => void;
   variableKeys?: string[];
+  /** Only consulted when `body.mode === "graphql"` — introspection state and
+   * the fetch trigger, owned by `RequestBuilder` (it has the workspace/
+   * collection/request context an introspection fetch needs). */
+  graphqlSchemaState?: GraphqlBodyPanelState;
 }
 
-export function BodyEditor({ body, onChange, variableKeys }: Props) {
+export function BodyEditor({ body, onChange, variableKeys, graphqlSchemaState }: Props) {
   return (
     <div className="flex h-full flex-col">
       <div className="mb-3 flex w-fit flex-wrap gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
@@ -50,12 +68,19 @@ export function BodyEditor({ body, onChange, variableKeys }: Props) {
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1">{renderEditor(body, onChange, variableKeys)}</div>
+      <div className="min-h-0 flex-1">
+        {renderEditor(body, onChange, variableKeys, graphqlSchemaState)}
+      </div>
     </div>
   );
 }
 
-function renderEditor(body: RequestBody, onChange: (b: RequestBody) => void, variableKeys?: string[]) {
+function renderEditor(
+  body: RequestBody,
+  onChange: (b: RequestBody) => void,
+  variableKeys?: string[],
+  graphqlSchemaState?: GraphqlBodyPanelState,
+) {
   switch (body.mode) {
     case "none":
       return <p className="p-2 text-xs text-slate-400">This request has no body.</p>;
@@ -134,31 +159,97 @@ function renderEditor(body: RequestBody, onChange: (b: RequestBody) => void, var
       );
 
     case "graphql":
-      return (
-        <div className="flex flex-col gap-2">
+      return <GraphqlBody body={body} onChange={onChange} variableKeys={variableKeys} schemaState={graphqlSchemaState} />;
+  }
+}
+
+function GraphqlBody({
+  body,
+  onChange,
+  variableKeys,
+  schemaState,
+}: {
+  body: Extract<RequestBody, { mode: "graphql" }>;
+  onChange: (b: RequestBody) => void;
+  variableKeys?: string[];
+  schemaState?: GraphqlBodyPanelState;
+}) {
+  const [docsOpen, setDocsOpen] = useState(false);
+  const status = schemaState?.status ?? "idle";
+
+  return (
+    <div className="flex h-full min-h-0 gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="flex items-center justify-between">
           <span className="text-xs text-slate-500 dark:text-slate-400">Query</span>
-          <LazyCodeEditor
-            language="graphql"
-            height="150px"
-            value={body.data.query}
-            onChange={(v) =>
-              onChange({ mode: "graphql", data: { ...body.data, query: v ?? "" } })
+          <div className="flex items-center gap-2">
+            {status === "error" && (
+              <span className="max-w-[220px] truncate text-xs text-red-500" title={schemaState?.error ?? ""}>
+                {schemaState?.error}
+              </span>
+            )}
+            {status === "ready" && <span className="text-xs text-green-600 dark:text-green-500">Schema loaded</span>}
+            <button
+              type="button"
+              onClick={() => schemaState?.onFetchSchema()}
+              disabled={status === "loading"}
+              className="flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <RefreshCw size={11} className={status === "loading" ? "animate-spin" : ""} />
+              {status === "loading" ? "Fetching…" : "Fetch schema"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDocsOpen((o) => !o)}
+              disabled={!schemaState?.schema}
+              className={
+                "flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-40 " +
+                (docsOpen
+                  ? "border-accent/40 bg-accent/10 text-accent"
+                  : "border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800")
+              }
+            >
+              <BookOpen size={11} />
+              Docs
+            </button>
+          </div>
+        </div>
+        <LazyCodeEditor
+          language="graphql"
+          height="150px"
+          value={body.data.query}
+          onChange={(v) => onChange({ mode: "graphql", data: { ...body.data, query: v ?? "" } })}
+          variableKeys={variableKeys}
+          graphqlSchema={schemaState?.schema}
+        />
+        <span className="text-xs text-slate-500 dark:text-slate-400">Operation name (optional)</span>
+        <input
+          value={body.data.operationName ?? ""}
+          onChange={(e) => onChange({ mode: "graphql", data: { ...body.data, operationName: e.target.value } })}
+          placeholder="e.g. GetPets — only needed when the query defines more than one operation"
+          className="rounded-lg border border-slate-200 bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 dark:border-slate-700"
+        />
+        <span className="text-xs text-slate-500 dark:text-slate-400">Variables (JSON)</span>
+        <LazyCodeEditor
+          language="json"
+          height="90px"
+          value={body.data.variables ?? ""}
+          onChange={(v) => onChange({ mode: "graphql", data: { ...body.data, variables: v ?? "" } })}
+          variableKeys={variableKeys}
+        />
+      </div>
+      {docsOpen && schemaState?.schema && (
+        <div className="w-64 shrink-0 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-800">
+          <LazyGraphqlDocsExplorer
+            schema={schemaState.schema}
+            onInsert={(name) =>
+              onChange({ mode: "graphql", data: { ...body.data, query: body.data.query + (body.data.query.endsWith("\n") || body.data.query === "" ? "" : "\n") + name } })
             }
-            variableKeys={variableKeys}
-          />
-          <span className="text-xs text-slate-500 dark:text-slate-400">Variables (JSON)</span>
-          <LazyCodeEditor
-            language="json"
-            height="90px"
-            value={body.data.variables ?? ""}
-            onChange={(v) =>
-              onChange({ mode: "graphql", data: { ...body.data, variables: v ?? "" } })
-            }
-            variableKeys={variableKeys}
           />
         </div>
-      );
-  }
+      )}
+    </div>
+  );
 }
 
 function monacoLang(lang?: string | null): string {

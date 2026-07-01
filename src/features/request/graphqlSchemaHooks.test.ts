@@ -37,8 +37,8 @@ function toyIntrospectionResponse(): string {
 }
 
 describe("schemaFromIntrospectionResponse", () => {
-  it("reconstructs a GraphQLSchema whose types/fields match the source SDL", () => {
-    const schema = schemaFromIntrospectionResponse(toyIntrospectionResponse());
+  it("reconstructs a GraphQLSchema whose types/fields match the source SDL", async () => {
+    const schema = await schemaFromIntrospectionResponse(toyIntrospectionResponse());
 
     expect(schema.getQueryType()?.name).toBe("Query");
     expect(schema.getMutationType()?.name).toBe("Mutation");
@@ -48,12 +48,12 @@ describe("schemaFromIntrospectionResponse", () => {
     expect(petsField?.type.toString()).toBe("[Pet!]!");
   });
 
-  it("throws with the server's message on a GraphQL errors response", () => {
+  it("throws with the server's message on a GraphQL errors response", async () => {
     const body = JSON.stringify({ errors: [{ message: "nope" }] });
-    expect(() => schemaFromIntrospectionResponse(body)).toThrow(/nope/);
+    await expect(schemaFromIntrospectionResponse(body)).rejects.toThrow(/nope/);
   });
 
-  it("throws on a response with no __schema field", () => {
-    expect(() => schemaFromIntrospectionResponse(JSON.stringify({ data: {} }))).toThrow(/__schema/);
+  it("throws on a response with no __schema field", async () => {
+    await expect(schemaFromIntrospectionResponse(JSON.stringify({ data: {} }))).rejects.toThrow(/__schema/);
   });
 });

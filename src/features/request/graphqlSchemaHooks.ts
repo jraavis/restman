@@ -4,9 +4,14 @@
 //! wasteful and noisy. State is local to whatever calls the hook (not
 //! persisted, not shared across tabs) since a fetched schema is ephemeral
 //! diagnostic data, same posture as the SSE/WS/gRPC panels' connection state.
+//!
+//! The `graphql` package is dynamically imported (not a top-level import)
+//! since this hook is used from `RequestBuilder`, which sits outside this
+//! app's lazy-Monaco boundary — a static import would put `graphql` in the
+//! main bundle for every user, not just ones who open the GraphQL body mode.
 
 import { useCallback, useState } from "react";
-import { buildClientSchema, getIntrospectionQuery, type GraphQLSchema } from "graphql";
+import type { GraphQLSchema } from "graphql";
 import type { HttpRequest } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
 
@@ -19,16 +24,11 @@ export interface GraphqlSchemaState {
   fetchSchema: (req: HttpRequest, workspaceId: string, collectionId: string | null, requestId: string | null) => void;
 }
 
-/** The query text `introspect_graphql_schema` actually sends is a Rust-side
- * constant (kept in sync manually); this is only used to confirm the shape
- * a response should have before parsing, not sent anywhere from the frontend. */
-export const INTROSPECTION_QUERY_FOR_REFERENCE = getIntrospectionQuery();
-
 /** Parses a raw `{ data: { __schema: ... } }` introspection response body into
  * a `GraphQLSchema`. Throws (doesn't swallow) on invalid JSON, a GraphQL
  * error response (`{ errors: [...] }`), or a malformed introspection shape —
  * callers surface the message as the fetch's `error` state. */
-export function schemaFromIntrospectionResponse(rawBody: string): GraphQLSchema {
+export async function schemaFromIntrospectionResponse(rawBody: string): Promise<GraphQLSchema> {
   const parsed = JSON.parse(rawBody);
   if (parsed.errors) {
     const messages = Array.isArray(parsed.errors)
@@ -39,6 +39,7 @@ export function schemaFromIntrospectionResponse(rawBody: string): GraphQLSchema 
   if (!parsed.data?.__schema) {
     throw new Error("Response has no __schema field — is this a GraphQL endpoint?");
   }
+  const { buildClientSchema } = await import("graphql");
   return buildClientSchema(parsed.data);
 }
 
@@ -53,8 +54,9 @@ export function useGraphqlSchema(): GraphqlSchemaState {
       setError(null);
       ipc
         .introspectGraphqlSchema(req, workspaceId, collectionId, requestId)
-        .then((raw) => {
-          setSchema(schemaFromIntrospectionResponse(raw));
+        .then((raw) => schemaFromIntrospectionResponse(raw))
+        .then((parsedSchema) => {
+          setSchema(parsedSchema);
           setStatus("ready");
         })
         .catch((e) => {
