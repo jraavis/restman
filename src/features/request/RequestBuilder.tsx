@@ -1,7 +1,8 @@
 //! The request editor: method + URL + send, over Params/Headers/Body/Options.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown, Save, Send } from "lucide-react";
+import { useRegisterCommand } from "../../lib/commands";
 import { COMMON_HEADERS, type HeaderEntry } from "../../lib/http";
 import { HTTP_METHODS, isValidUrl, methodBadgeClasses, protocolOf } from "../../lib/methods";
 import { Switch } from "../../components/Switch";
@@ -59,24 +60,12 @@ export function RequestBuilder() {
     },
   };
 
-  // Cmd/Ctrl+S: overwrite directly if already linked, otherwise prompt for a
-  // name + collection. Mounted once; reads the latest save/isLinked through
-  // refs so the listener doesn't re-attach on every keystroke in the builder.
-  const isLinkedRef = useRef(isLinked);
-  isLinkedRef.current = isLinked;
-  const saveRef = useRef(save);
-  saveRef.current = save;
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "s") return;
-      e.preventDefault();
-      if (isLinkedRef.current) void saveRef.current();
-      else setShowSaveDialog(true);
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  // Cmd/Ctrl+S (via the "request.save" command): overwrite directly if
+  // already linked, otherwise prompt for a name + collection.
+  useRegisterCommand("request.save", () => {
+    if (isLinked) void save();
+    else setShowSaveDialog(true);
+  });
 
   const [tab, setTab] = useState<Tab>("params");
 

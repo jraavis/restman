@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MoreHorizontal, Plus, X } from "lucide-react";
+import { useRegisterCommands } from "../../lib/commands";
 import { defaultRequest } from "../../lib/http";
 import { methodBadgeClasses } from "../../lib/methods";
 import type { Tab } from "../../lib/types";
@@ -61,27 +62,26 @@ export function TabsBar() {
     setActiveTab.mutate(id);
   }
 
-  // Cmd/Ctrl+1..9 switches to the tab at that position. Mounted once; reads
-  // the latest tabs/switchTo through refs so it doesn't re-attach on every
-  // keystroke in the request builder.
+  // Cmd/Ctrl+1..9 switches to the tab at that position; reads the latest
+  // tabs through a ref since `useRegisterCommands` only re-runs its effect
+  // when the set of command ids changes, not on every tabs/switchTo update.
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const switchToRef = useRef(switchTo);
   switchToRef.current = switchTo;
 
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const n = Number(e.key);
-      if (!Number.isInteger(n) || n < 1 || n > 9) return;
-      const target = tabsRef.current[n - 1];
-      if (!target) return;
-      e.preventDefault();
-      switchToRef.current(target.id);
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useRegisterCommands({
+    ...Object.fromEntries(
+      Array.from({ length: 9 }, (_, i) => [
+        `tab.switchTo.${i + 1}`,
+        () => {
+          const target = tabsRef.current[i];
+          if (target) switchToRef.current(target.id);
+        },
+      ]),
+    ),
+    "tab.new": () => createTab.mutate({ requestId: null, title: "Untitled", draft: defaultRequest() }),
+  });
 
   const dragIndex = useRef<number | null>(null);
   function onDrop(toIndex: number) {

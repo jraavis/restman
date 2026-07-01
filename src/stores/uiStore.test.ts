@@ -21,4 +21,11 @@ describe("uiStore", () => {
     useUiStore.getState().setActivePanel("history");
     expect(useUiStore.getState().activePanel).toBe("history");
   });
+
+  it("sets and clears a keybinding override", () => {
+    useUiStore.getState().setKeybindingOverride("request.save", "mod+shift+s");
+    expect(useUiStore.getState().keybindingOverrides["request.save"]).toBe("mod+shift+s");
+    useUiStore.getState().clearKeybindingOverride("request.save");
+    expect(useUiStore.getState().keybindingOverrides["request.save"]).toBeUndefined();
+  });
 });

@@ -2,6 +2,7 @@
 //! The request/response divide is a drag-resizable vertical split.
 
 import { ResizeHandle } from "../components/ResizeHandle";
+import { useGlobalCommandShortcuts } from "../lib/commands";
 import { useUiStore } from "../stores/uiStore";
 import { RequestPane } from "./RequestPane";
 import { ResponsePanel } from "./ResponsePanel";
@@ -12,6 +13,7 @@ export function AppShell() {
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const requestSplit = useUiStore((s) => s.requestSplit);
   const setRequestSplit = useUiStore((s) => s.setRequestSplit);
+  useGlobalCommandShortcuts();
 
   return (
     <div className="flex h-full flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
