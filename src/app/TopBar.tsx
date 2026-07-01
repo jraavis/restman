@@ -20,7 +20,7 @@ import { SsePanel } from "../features/streaming/SsePanel";
 import { WsPanel } from "../features/streaming/WsPanel";
 import { GrpcPanel } from "../features/streaming/GrpcPanel";
 import { EnvironmentSwitcher } from "../features/environments/EnvironmentSwitcher";
-import { SettingsPanel } from "../features/settings/SettingsPanel";
+import { SettingsDialog } from "../features/settings/SettingsDialog";
 import { useDismissable } from "../lib/useDismissable";
 import { useUiStore } from "../stores/uiStore";
 
@@ -32,6 +32,7 @@ export function TopBar() {
   const updateWs = useUpdateWorkspace();
   const deleteWs = useDeleteWorkspace();
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+  const confirmBeforeDelete = useUiStore((s) => s.confirmBeforeDelete);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cookiesOpen, setCookiesOpen] = useState(false);
   const [streamingOpen, setStreamingOpen] = useState(false);
@@ -58,7 +59,10 @@ export function TopBar() {
     setWsMenuOpen(false);
     if (!active) return;
     if ((workspaces?.length ?? 0) <= 1) return;
-    if (window.confirm(`Delete workspace "${active.name}" and everything in it? This can't be undone.`)) {
+    if (
+      !confirmBeforeDelete ||
+      window.confirm(`Delete workspace "${active.name}" and everything in it? This can't be undone.`)
+    ) {
       deleteWs.mutate(active.id);
     }
   }
@@ -225,7 +229,7 @@ export function TopBar() {
         <button
           type="button"
           onClick={() => setSettingsOpen((o) => !o)}
-          title="Appearance settings"
+          title="Settings"
           aria-expanded={settingsOpen}
           className={
             "flex h-7 w-7 items-center justify-center rounded-md transition-colors " +
@@ -238,7 +242,7 @@ export function TopBar() {
         </button>
       </div>
 
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} workspaceId={active?.id} />}
       {cookiesOpen && <CookieJarDialog onClose={() => setCookiesOpen(false)} />}
       {streamingOpen && active && (
         <SsePanel workspaceId={active.id} onClose={() => setStreamingOpen(false)} />

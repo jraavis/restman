@@ -1,5 +1,4 @@
-//! Shared outside-click + Escape dismissal for popovers, matching the
-//! pattern already used by `SettingsPanel`.
+//! Shared outside-click + Escape dismissal for popovers.
 
 import { useEffect, useRef } from "react";
 
