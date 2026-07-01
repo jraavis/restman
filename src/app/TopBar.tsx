@@ -3,7 +3,7 @@
 //! settings.
 
 import { useState } from "react";
-import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Puzzle, Radio, Settings, Settings2, Trash2, Zap } from "lucide-react";
+import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Puzzle, Radio, Server, Settings, Settings2, Trash2, Zap } from "lucide-react";
 import { useRegisterCommand } from "../lib/commands";
 import {
   useActiveWorkspace,
@@ -15,6 +15,7 @@ import {
 } from "../features/workspaces/hooks";
 import { WorkspaceSettingsDialog } from "../features/workspaces/WorkspaceSettingsDialog";
 import { PluginManagerDialog } from "../features/plugins/PluginManagerDialog";
+import { MockServerManagerDialog } from "../features/mocks/MockServerManagerDialog";
 import { CookieJarDialog } from "../features/cookies/CookieJarDialog";
 import { SsePanel } from "../features/streaming/SsePanel";
 import { WsPanel } from "../features/streaming/WsPanel";
@@ -40,6 +41,7 @@ export function TopBar() {
   const [grpcOpen, setGrpcOpen] = useState(false);
   const [wsSettingsOpen, setWsSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
+  const [mockServersOpen, setMockServersOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -177,6 +179,17 @@ export function TopBar() {
               </button>
               <button
                 type="button"
+                disabled={!active}
+                onClick={() => {
+                  setWsMenuOpen(false);
+                  setMockServersOpen(true);
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-700"
+              >
+                <Server size={12} /> Mock Servers
+              </button>
+              <button
+                type="button"
                 disabled={!active || (workspaces?.length ?? 0) <= 1}
                 onClick={handleDeleteWorkspace}
                 title={(workspaces?.length ?? 0) <= 1 ? "Can't delete the only workspace" : undefined}
@@ -262,6 +275,9 @@ export function TopBar() {
       )}
       {pluginsOpen && active && (
         <PluginManagerDialog workspaceId={active.id} onClose={() => setPluginsOpen(false)} />
+      )}
+      {mockServersOpen && active && (
+        <MockServerManagerDialog workspaceId={active.id} onClose={() => setMockServersOpen(false)} />
       )}
     </header>
   );

@@ -25,6 +25,10 @@ import type {
   ImportedNode,
   ImportPreview,
   ImportReport,
+  MockRule,
+  MockRuleInput,
+  MockServer,
+  MockServerInput,
   OAuth2Status,
   Plugin,
   PluginInput,
@@ -305,4 +309,23 @@ export const ipc = {
     invoke<ImportPreview>("preview_plugin_import", { source, content }),
   previewPluginExport: (source: string, node: ImportedNode) =>
     invoke<string>("preview_plugin_export", { source, node }),
+
+  // Mock servers — local method+path -> canned-response stand-ins.
+  listMockServers: (workspaceId: string) => invoke<MockServer[]>("list_mock_servers", { workspaceId }),
+  createMockServer: (workspaceId: string, input: MockServerInput) =>
+    invoke<MockServer>("create_mock_server", { workspaceId, input }),
+  createMockServerFromCollection: (workspaceId: string, collectionId: string, name: string, port: number) =>
+    invoke<MockServer>("create_mock_server_from_collection", { workspaceId, collectionId, name, port }),
+  updateMockServer: (id: string, input: MockServerInput) => invoke<MockServer>("update_mock_server", { id, input }),
+  deleteMockServer: (id: string) => invoke<void>("delete_mock_server", { id }),
+  listMockRules: (mockServerId: string) => invoke<MockRule[]>("list_mock_rules", { mockServerId }),
+  createMockRule: (mockServerId: string, input: MockRuleInput) =>
+    invoke<MockRule>("create_mock_rule", { mockServerId, input }),
+  updateMockRule: (id: string, input: MockRuleInput) => invoke<MockRule>("update_mock_rule", { id, input }),
+  deleteMockRule: (id: string) => invoke<void>("delete_mock_rule", { id }),
+  /** Resolves to the actually-bound port (matches the config's `port` unless
+   * that was 0). Rejects if already running or if the port couldn't be bound. */
+  startMockServer: (id: string) => invoke<number>("start_mock_server", { id }),
+  stopMockServer: (id: string) => invoke<void>("stop_mock_server", { id }),
+  listRunningMockServerIds: () => invoke<string[]>("list_running_mock_server_ids"),
 };
