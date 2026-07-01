@@ -46,6 +46,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::send_request,
+            commands::introspect_graphql_schema,
             commands::start_oauth2_authorization,
             commands::get_oauth2_status,
             commands::list_workspaces,

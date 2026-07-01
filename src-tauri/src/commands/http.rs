@@ -238,8 +238,10 @@ pub(crate) fn resolve_owner_and_config(
 
 /// Resolves the request's effective auth, recovers secrets from the keychain,
 /// and collapses OAuth2 to a bearer token. Never holds the DB lock across an
-/// `.await`.
-async fn resolve_auth(
+/// `.await`. Shared by `send_request` and `commands::graphql::introspect_graphql_schema`
+/// (introspection is a genuine live fetch, unlike codegen's preview-only path,
+/// so it needs the real OAuth2 exchange here, not a cached-or-placeholder token).
+pub(crate) async fn resolve_auth(
     state: &State<'_, AppState>,
     collection_id: Option<&str>,
     request_id: Option<&str>,
