@@ -2,11 +2,12 @@
 //! entries, clear with confirm.
 
 import { useState } from "react";
-import { AlertCircle, Loader2, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertCircle, GitCompare, Loader2, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import { useClearHistory, useDeleteHistoryEntry, useHistory, useReplayIntoDraft } from "./hooks";
 import { HTTP_METHODS, methodBadgeClasses, statusColor } from "../../lib/methods";
 import { formatMs } from "../../lib/encoding";
+import { HistoryDiffDialog } from "./HistoryDiffDialog";
 import type { HistoryEntry, HistoryFilter } from "../../lib/types";
 
 type StatusClass = "any" | "2xx" | "3xx" | "4xx" | "5xx";
@@ -44,12 +45,36 @@ export function HistoryPanel() {
   const clearHistory = useClearHistory(workspace?.id);
   const replay = useReplayIntoDraft(workspace?.id);
 
+  const [compareMode, setCompareMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [diffPair, setDiffPair] = useState<[HistoryEntry, HistoryEntry] | null>(null);
+
   const handleClear = () => {
     if (!workspace) return;
     if (window.confirm("Clear all history for this workspace? This can't be undone.")) {
       clearHistory.mutate();
     }
   };
+
+  function toggleCompareMode() {
+    setCompareMode((m) => !m);
+    setSelectedIds([]);
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((ids) => {
+      if (ids.includes(id)) return ids.filter((x) => x !== id);
+      if (ids.length >= 2) return [ids[1], id]; // keep the most recent 2 picks
+      return [...ids, id];
+    });
+  }
+
+  function openDiff() {
+    if (selectedIds.length !== 2 || !entries) return;
+    const a = entries.find((e) => e.id === selectedIds[0]);
+    const b = entries.find((e) => e.id === selectedIds[1]);
+    if (a && b) setDiffPair([a, b]);
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -120,15 +145,44 @@ export function HistoryPanel() {
             </button>
           )}
         </div>
-        <button
-          type="button"
-          onClick={handleClear}
-          disabled={!entries?.length}
-          className="self-start text-xs text-slate-400 hover:text-red-500 disabled:opacity-40 disabled:hover:text-slate-400"
-        >
-          Clear all
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={!entries?.length}
+            className="text-xs text-slate-400 hover:text-red-500 disabled:opacity-40 disabled:hover:text-slate-400"
+          >
+            Clear all
+          </button>
+          <button
+            type="button"
+            onClick={toggleCompareMode}
+            disabled={!entries || entries.length < 2}
+            className={
+              "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium disabled:opacity-40 " +
+              (compareMode
+                ? "bg-accent/10 text-accent"
+                : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800")
+            }
+          >
+            <GitCompare size={12} /> Compare
+          </button>
+        </div>
       </div>
+
+      {compareMode && (
+        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-2 py-1.5 text-xs dark:border-slate-800 dark:bg-slate-900">
+          <span className="text-slate-500 dark:text-slate-400">Pick 2 entries to compare ({selectedIds.length}/2)</span>
+          <button
+            type="button"
+            onClick={openDiff}
+            disabled={selectedIds.length !== 2}
+            className="rounded-md bg-accent px-2 py-1 font-medium text-white disabled:opacity-40"
+          >
+            Compare selected
+          </button>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-auto">
         {isLoading && (
@@ -148,9 +202,16 @@ export function HistoryPanel() {
             entry={entry}
             onReplay={() => void replay(entry)}
             onDelete={() => deleteEntry.mutate(entry.id)}
+            compareMode={compareMode}
+            selected={selectedIds.includes(entry.id)}
+            onToggleSelected={() => toggleSelected(entry.id)}
           />
         ))}
       </div>
+
+      {diffPair && (
+        <HistoryDiffDialog entryA={diffPair[0]} entryB={diffPair[1]} onClose={() => setDiffPair(null)} />
+      )}
     </div>
   );
 }
@@ -159,13 +220,36 @@ function HistoryRow({
   entry,
   onReplay,
   onDelete,
+  compareMode,
+  selected,
+  onToggleSelected,
 }: {
   entry: HistoryEntry;
   onReplay: () => void;
   onDelete: () => void;
+  compareMode: boolean;
+  selected: boolean;
+  onToggleSelected: () => void;
 }) {
   return (
-    <div className="group flex items-start gap-2 border-b border-slate-100 px-2 py-2 text-xs hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50">
+    <div
+      onClick={compareMode ? onToggleSelected : undefined}
+      className={
+        "group flex items-start gap-2 border-b border-slate-100 px-2 py-2 text-xs dark:border-slate-800 " +
+        (compareMode
+          ? "cursor-pointer " + (selected ? "bg-accent/10" : "hover:bg-slate-50 dark:hover:bg-slate-800/50")
+          : "hover:bg-slate-50 dark:hover:bg-slate-800/50")
+      }
+    >
+      {compareMode && (
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelected}
+          onClick={(e) => e.stopPropagation()}
+          className="mt-1 shrink-0"
+        />
+      )}
       <span
         className={
           "mt-0.5 shrink-0 rounded border px-1.5 py-0.5 font-bold " + methodBadgeClasses(entry.method)
@@ -188,24 +272,26 @@ function HistoryRow({
         </div>
         {entry.error && <p className="mt-0.5 truncate text-red-500" title={entry.error}>{entry.error}</p>}
       </div>
-      <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
-        <button
-          type="button"
-          title="Replay"
-          onClick={onReplay}
-          className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-        >
-          <RotateCcw size={13} />
-        </button>
-        <button
-          type="button"
-          title="Delete"
-          onClick={onDelete}
-          className="rounded p-1 text-slate-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40"
-        >
-          <Trash2 size={13} />
-        </button>
-      </div>
+      {!compareMode && (
+        <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
+          <button
+            type="button"
+            title="Replay"
+            onClick={onReplay}
+            className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+          >
+            <RotateCcw size={13} />
+          </button>
+          <button
+            type="button"
+            title="Delete"
+            onClick={onDelete}
+            className="rounded p-1 text-slate-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
