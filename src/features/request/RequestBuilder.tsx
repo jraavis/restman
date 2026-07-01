@@ -66,6 +66,9 @@ export function RequestBuilder() {
     if (isLinked) void save();
     else setShowSaveDialog(true);
   });
+  // "request.send" has no default shortcut (Cmd+Enter-in-the-URL-bar
+  // already sends, scoped to that input only) — palette-invokable only.
+  useRegisterCommand("request.send", () => void send());
 
   const [tab, setTab] = useState<Tab>("params");
 

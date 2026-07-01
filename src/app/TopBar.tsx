@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Puzzle, Radio, Settings, Settings2, Trash2, Zap } from "lucide-react";
+import { useRegisterCommand } from "../lib/commands";
 import {
   useActiveWorkspace,
   useCreateWorkspace,
@@ -42,6 +43,8 @@ export function TopBar() {
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState("");
   const wsMenuRef = useDismissable<HTMLDivElement>(() => setWsMenuOpen(false));
+
+  useRegisterCommand("app.openSettings", () => setSettingsOpen((o) => !o));
 
   function commitRename() {
     setRenaming(false);

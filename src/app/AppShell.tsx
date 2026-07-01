@@ -1,8 +1,10 @@
 //! Top-level layout: top bar over a sidebar + main (request / response) split.
 //! The request/response divide is a drag-resizable vertical split.
 
+import { useState } from "react";
 import { ResizeHandle } from "../components/ResizeHandle";
-import { useGlobalCommandShortcuts } from "../lib/commands";
+import { CommandPalette } from "../features/commands/CommandPalette";
+import { useGlobalCommandShortcuts, useRegisterCommand } from "../lib/commands";
 import { useUiStore } from "../stores/uiStore";
 import { RequestPane } from "./RequestPane";
 import { ResponsePanel } from "./ResponsePanel";
@@ -15,8 +17,12 @@ export function AppShell() {
   const setRequestSplit = useUiStore((s) => s.setRequestSplit);
   useGlobalCommandShortcuts();
 
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useRegisterCommand("app.commandPalette", () => setPaletteOpen((o) => !o));
+
   return (
     <div className="flex h-full flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <TopBar />
       <div className="flex min-h-0 flex-1">
         {sidebarOpen && <Sidebar />}
