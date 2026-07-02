@@ -23,6 +23,8 @@ vi.mock("../../lib/ipc", () => ({
     getHistoryRetention: vi.fn().mockResolvedValue(200),
     setHistoryRetention: vi.fn(),
     clearHistory: vi.fn(),
+    // Data tab's ExportImportSection lists workspaces on mount.
+    listWorkspaces: vi.fn().mockResolvedValue([]),
   },
 }));
 

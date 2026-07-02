@@ -16,6 +16,8 @@ import type {
   EnvironmentImportReport,
   EnvironmentPreview,
   ExportFormat,
+  FullImportPreview,
+  FullImportReport,
   GrpcConnectArgs,
   GrpcEvent,
   GrpcOutbound,
@@ -214,6 +216,15 @@ export const ipc = {
     }),
   exportEnvironment: (environmentId: string) =>
     invoke<string>("export_environment", { environmentId }),
+
+  // Restman-native full export/import (`.restman.json`) — selected whole
+  // workspaces incl. collections, scripts, environments, and variables.
+  exportRestman: (workspaceIds: string[], includeSecrets: boolean, includeSettings: boolean) =>
+    invoke<string>("export_restman", { workspaceIds, includeSecrets, includeSettings }),
+  previewRestmanImport: (content: string) =>
+    invoke<FullImportPreview>("preview_restman_import", { content }),
+  applyRestmanImport: (content: string, mode: ConflictMode) =>
+    invoke<FullImportReport>("apply_restman_import", { content, mode }),
 
   // Files
   writeFileBytes: (path: string, contentBase64: string) =>

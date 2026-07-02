@@ -544,6 +544,45 @@ export interface EnvironmentImportReport {
 }
 
 // ---------------------------------------------------------------------------
+// Restman-native full export/import (`.restman.json`) — mirrors
+// `interop::restman::{FullImportPreview, FullImportReport}`
+// ---------------------------------------------------------------------------
+
+export interface RestmanWorkspacePreview {
+  name: string;
+  /** A same-name workspace already exists — import merges into it. */
+  exists: boolean;
+  collections: number;
+  requests: number;
+  environments: number;
+  variables: number;
+}
+
+export interface FullImportPreview {
+  version: number;
+  appVersion: string;
+  includesSecrets: boolean;
+  workspaces: RestmanWorkspacePreview[];
+  globalVariables: number;
+  /** Secret values carried as masks — unrecoverable on import. */
+  maskedSecrets: number;
+  warnings: string[];
+}
+
+export interface FullImportReport {
+  workspacesCreated: number;
+  createdCollections: number;
+  createdRequests: number;
+  skipped: number;
+  overwritten: number;
+  environmentsCreated: number;
+  variablesCreated: number;
+  variablesOverwritten: number;
+  variablesSkipped: number;
+  warnings: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Code generation (Phase 5) — mirrors `codegen::{CodeLanguage, CodegenOptions}`
 // ---------------------------------------------------------------------------
 

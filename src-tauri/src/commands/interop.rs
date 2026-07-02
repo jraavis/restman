@@ -1,6 +1,7 @@
 use crate::commands::plugins::require_kind;
 use crate::error::{AppError, AppResult};
-use crate::interop::{self, environment, ConflictMode, ExportFormat, ImportFormat, ImportPreview, ImportReport, ImportedNode, EnvironmentImportReport, EnvironmentPreview};
+use crate::interop::restman::{FullImportPreview, FullImportReport};
+use crate::interop::{self, environment, restman, ConflictMode, ExportFormat, ImportFormat, ImportPreview, ImportReport, ImportedNode, EnvironmentImportReport, EnvironmentPreview};
 use crate::model::PluginKind;
 use crate::store::{self, AppState};
 use tauri::State;
@@ -93,4 +94,34 @@ pub fn apply_environment_import(
 pub fn export_environment(state: State<AppState>, environment_id: String) -> AppResult<String> {
     let conn = state.db.lock().unwrap();
     environment::export_environment(&conn, &environment_id)
+}
+
+/// Restman-native full export/import (`.restman.json`) — selected whole
+/// workspaces, see `interop::restman`. `include_secrets` is the explicit
+/// plaintext opt-in the Data-tab UI warns about.
+#[tauri::command]
+pub fn export_restman(
+    state: State<AppState>,
+    workspace_ids: Vec<String>,
+    include_secrets: bool,
+    include_settings: bool,
+) -> AppResult<String> {
+    let conn = state.db.lock().unwrap();
+    restman::export_full(&conn, &workspace_ids, include_secrets, include_settings)
+}
+
+#[tauri::command]
+pub fn preview_restman_import(state: State<AppState>, content: String) -> AppResult<FullImportPreview> {
+    let conn = state.db.lock().unwrap();
+    restman::preview_full(&conn, &content)
+}
+
+#[tauri::command]
+pub fn apply_restman_import(
+    state: State<AppState>,
+    content: String,
+    mode: ConflictMode,
+) -> AppResult<FullImportReport> {
+    let conn = state.db.lock().unwrap();
+    restman::apply_full(&conn, &content, mode)
 }

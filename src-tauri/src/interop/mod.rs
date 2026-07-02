@@ -26,6 +26,7 @@ pub mod insomnia;
 pub mod openapi;
 pub mod plugin;
 pub mod postman;
+pub mod restman;
 
 use crate::error::AppResult;
 use crate::model::auth::{AuthConfig, RequestAuth};
@@ -347,36 +348,61 @@ fn unique_request_name(existing: &[crate::model::SavedRequest], base: &str) -> S
 /// `ImportedNode` tree, for export. Auth is read straight from `auth_json`,
 /// which is already mask-on-write — see module doc.
 pub fn collect(conn: &Connection, collection_id: &str) -> AppResult<ImportedNode> {
-    let collection = store::collections::get(conn, collection_id)?;
-    collect_node(conn, &collection)
+    collect_with_secrets(conn, collection_id, false)
 }
 
-fn collect_node(conn: &Connection, collection: &Collection) -> AppResult<ImportedNode> {
+/// `collect`, with an opt-in knob to hydrate real auth secrets from the
+/// keychain instead of carrying the stored `SECRET_MASK`. Only the
+/// restman-native full export uses `hydrate_secrets = true` (behind an
+/// explicit user opt-in) — every interchange-format export stays masked.
+pub fn collect_with_secrets(
+    conn: &Connection,
+    collection_id: &str,
+    hydrate_secrets: bool,
+) -> AppResult<ImportedNode> {
+    let collection = store::collections::get(conn, collection_id)?;
+    collect_node(conn, &collection, hydrate_secrets)
+}
+
+fn collect_node(conn: &Connection, collection: &Collection, hydrate_secrets: bool) -> AppResult<ImportedNode> {
     let requests = store::requests::list_by_collection(conn, &collection.id)?
         .into_iter()
-        .map(|r| ImportedRequest {
-            name: r.name,
-            method: r.method,
-            url: r.url,
-            headers: r.headers,
-            query: r.query,
-            body: r.body,
-            options: r.options,
-            auth: r.auth,
-            pre_request_script: r.pre_request_script,
-            post_response_script: r.post_response_script,
+        .map(|r| {
+            let auth = if hydrate_secrets {
+                crate::auth::hydrate_request_auth(&crate::auth::owner_key("request", &r.id), r.auth)?
+            } else {
+                r.auth
+            };
+            Ok(ImportedRequest {
+                name: r.name,
+                method: r.method,
+                url: r.url,
+                headers: r.headers,
+                query: r.query,
+                body: r.body,
+                options: r.options,
+                auth,
+                pre_request_script: r.pre_request_script,
+                post_response_script: r.post_response_script,
+            })
         })
-        .collect();
+        .collect::<AppResult<Vec<_>>>()?;
 
     let children = store::collections::list_children(conn, &collection.workspace_id, Some(&collection.id))?
         .iter()
-        .map(|c| collect_node(conn, c))
+        .map(|c| collect_node(conn, c, hydrate_secrets))
         .collect::<AppResult<Vec<_>>>()?;
+
+    let auth = if hydrate_secrets {
+        crate::auth::hydrate(&crate::auth::owner_key("collection", &collection.id), collection.auth.clone())?
+    } else {
+        collection.auth.clone()
+    };
 
     Ok(ImportedNode {
         name: collection.name.clone(),
         description: collection.description.clone(),
-        auth: collection.auth.clone(),
+        auth,
         requests,
         children,
     })
