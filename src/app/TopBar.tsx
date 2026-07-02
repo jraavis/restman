@@ -3,7 +3,7 @@
 //! settings.
 
 import { useState } from "react";
-import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Puzzle, Radio, Server, Settings, Settings2, Trash2, Zap } from "lucide-react";
+import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Puzzle, Radio, Server, Settings, Settings2, Trash2 } from "lucide-react";
 import { useRegisterCommand } from "../lib/commands";
 import { confirmDelete } from "../lib/confirmDelete";
 import {
@@ -78,9 +78,7 @@ export function TopBar() {
       </button>
 
       <div className="flex items-center gap-1.5 pr-1">
-        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-white">
-          <Zap size={13} strokeWidth={2.5} />
-        </span>
+        <img src="/restman.png" alt="" className="h-6 w-6 rounded-md" />
         <span className="font-semibold tracking-tight text-slate-800 dark:text-slate-100">
           Restman
         </span>
