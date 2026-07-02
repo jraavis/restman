@@ -45,6 +45,19 @@ describe("SettingsDialog", () => {
     expect(screen.getByText("Theme")).toBeTruthy();
   });
 
+  it("General tab toggles automatic update checks", () => {
+    renderDialog();
+    expect(useUiStore.getState().autoCheckUpdates).toBe(true);
+    fireEvent.click(screen.getByText("Check for updates automatically"));
+    expect(useUiStore.getState().autoCheckUpdates).toBe(false);
+  });
+
+  it("About tab shows a version placeholder outside a Tauri shell", () => {
+    renderDialog();
+    fireEvent.click(screen.getByText("About"));
+    expect(screen.getByText("Version —")).toBeTruthy();
+  });
+
   it("switches to the Editor tab and toggles word wrap", () => {
     renderDialog();
     fireEvent.click(screen.getByText("Editor"));

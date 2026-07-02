@@ -11,21 +11,19 @@
 //! that's app-wide (every workspace), not scoped to the active one; see
 //! `crate::backup` module doc for why it bundles real secrets under a
 //! required password instead of following this app's usual mask-on-write
-//! export contract. About carries the auto-update check (Phase 8) — the
-//! signing keypair is real (generated via `tauri signer generate`; the
-//! public half is in `tauri.conf.json`, the private half is
-//! `src-tauri/updater-signing-key.private`, gitignored) but the update
-//! endpoint isn't a published release feed yet, so `check()` will error
-//! until one exists — see PLAN.md's Phase 8 write-up.
+//! export contract. About carries the manual update check, backed by the
+//! shared `useUpdater` store (also driving the launch-time `UpdateBanner`);
+//! the signing keypair and GitHub Releases endpoint are live — see PLAN.md.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { save } from "@tauri-apps/plugin-dialog";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
 import { Minus, Monitor, Moon, Plus, RotateCcw, Sun } from "lucide-react";
 import { COMMANDS, commandForShortcut, normalizeShortcut } from "../../lib/commands";
 import { ipc } from "../../lib/ipc";
 import { Switch } from "../../components/Switch";
+import { UpdateProgressBar } from "../updates/UpdateProgressBar";
+import { useUpdaterStore } from "../updates/useUpdater";
 import { useUiStore, type Accent, type Theme } from "../../stores/uiStore";
 import { useClearHistory, useHistoryRetention, useSetHistoryRetention } from "../history/hooks";
 
@@ -108,6 +106,8 @@ function GeneralTab() {
   const setAccent = useUiStore((s) => s.setAccent);
   const confirmBeforeDelete = useUiStore((s) => s.confirmBeforeDelete);
   const setConfirmBeforeDelete = useUiStore((s) => s.setConfirmBeforeDelete);
+  const autoCheckUpdates = useUiStore((s) => s.autoCheckUpdates);
+  const setAutoCheckUpdates = useUiStore((s) => s.setAutoCheckUpdates);
 
   return (
     <div className="flex flex-col gap-5">
@@ -162,6 +162,19 @@ function GeneralTab() {
         <p className="mt-1 text-xs text-slate-400">
           Applies to workspaces, collections, requests, environments, tags, plugins, and mock
           servers. Bulk actions (clear history, restore) always confirm.
+        </p>
+      </div>
+
+      <div>
+        <SectionLabel>Updates</SectionLabel>
+        <Switch
+          checked={autoCheckUpdates}
+          onChange={setAutoCheckUpdates}
+          label="Check for updates automatically"
+        />
+        <p className="mt-1 text-xs text-slate-400">
+          Checks GitHub for a new version shortly after launch and shows a prompt when one is
+          available. Nothing installs without your confirmation.
         </p>
       </div>
     </div>
@@ -532,17 +545,21 @@ function KeybindingsTab() {
   );
 }
 
-// Kept as a literal, not a package.json import: package.json sits outside
-// this project's tsconfig `include` root (`src`), and pulling in a bundler
-// build-time version string isn't worth the extra plumbing for this pass.
-const APP_VERSION = "0.1.0";
-
 function AboutTab() {
+  // Real bundle version from Tauri (`tauri.conf.json`'s `version`), replacing
+  // an earlier hardcoded literal that had already drifted. Null outside a
+  // Tauri shell (plain-vite dev/preview, jsdom tests).
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    getVersion().then(setVersion, () => {});
+  }, []);
+
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div>
         <p className="font-semibold text-slate-800 dark:text-slate-100">Restman</p>
-        <p className="text-xs text-slate-400">Version {APP_VERSION}</p>
+        <p className="text-xs text-slate-400">Version {version ?? "—"}</p>
       </div>
       <p className="text-slate-600 dark:text-slate-300">
         A privacy-first, offline-capable REST API client. All networking, storage, and
@@ -562,42 +579,31 @@ function AboutTab() {
   );
 }
 
-/** Checks the endpoint in `tauri.conf.json`'s `plugins.updater.endpoints`
- * directly via the JS plugin (`check`/`Update.downloadAndInstall`), same
- * direct-from-frontend pattern this app already uses for the dialog plugin
- * (`save`/`open`) — no custom Rust command needed, since the plugin already
- * only exposes safe, capability-gated operations. */
+/** Manual check, driven by the shared `useUpdater` store — same flow (and
+ * progress state) as the launch-time `UpdateBanner`, just surfaced inline. */
 function UpdateCheck() {
-  const [status, setStatus] = useState<string | null>(null);
-  const [update, setUpdate] = useState<Awaited<ReturnType<typeof check>> | null>(null);
-  const [busy, setBusy] = useState(false);
+  const phase = useUpdaterStore((s) => s.phase);
+  const update = useUpdaterStore((s) => s.update);
+  const progress = useUpdaterStore((s) => s.progress);
+  const error = useUpdaterStore((s) => s.error);
+  const checkForUpdate = useUpdaterStore((s) => s.checkForUpdate);
+  const installAndRestart = useUpdaterStore((s) => s.installAndRestart);
 
-  async function runCheck() {
-    setBusy(true);
-    setStatus("Checking…");
-    try {
-      const found = await check();
-      setUpdate(found);
-      setStatus(found ? `Update available: v${found.version}` : "You're up to date.");
-    } catch (e) {
-      setStatus(`Check failed: ${e}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function installAndRestart() {
-    if (!update) return;
-    setBusy(true);
-    setStatus("Downloading…");
-    try {
-      await update.downloadAndInstall();
-      await relaunch();
-    } catch (e) {
-      setStatus(`Install failed: ${e}`);
-      setBusy(false);
-    }
-  }
+  const busy = phase === "checking" || phase === "downloading" || phase === "installing";
+  const status =
+    phase === "checking"
+      ? "Checking…"
+      : phase === "available"
+        ? `Update available: v${update?.version}`
+        : phase === "downloading"
+          ? "Downloading…"
+          : phase === "installing"
+            ? "Installing…"
+            : phase === "upToDate"
+              ? "You're up to date."
+              : phase === "error"
+                ? `Update failed: ${error}`
+                : null;
 
   return (
     <div className="mt-1 border-t border-slate-100 pt-3 dark:border-slate-700">
@@ -605,7 +611,7 @@ function UpdateCheck() {
         <button
           type="button"
           disabled={busy}
-          onClick={runCheck}
+          onClick={() => void checkForUpdate()}
           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
         >
           Check for updates
@@ -614,13 +620,18 @@ function UpdateCheck() {
           <button
             type="button"
             disabled={busy}
-            onClick={installAndRestart}
+            onClick={() => void installAndRestart()}
             className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-40"
           >
             Install &amp; restart
           </button>
         )}
       </div>
+      {(phase === "downloading" || phase === "installing") && (
+        <div className="mt-2 w-64">
+          <UpdateProgressBar progress={progress} />
+        </div>
+      )}
       {status && <p className="mt-1.5 text-xs text-slate-400">{status}</p>}
     </div>
   );
