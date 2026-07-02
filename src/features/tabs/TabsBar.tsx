@@ -30,6 +30,7 @@ export function TabsBar() {
 
   const storeActiveTabId = useRequestStore((s) => s.activeTabId);
   const title = useRequestStore((s) => s.title);
+  const setTitle = useRequestStore((s) => s.setTitle);
   const request = useRequestStore((s) => s.request);
   const defaultRequestOptions = useUiStore((s) => s.defaultRequestOptions);
 
@@ -111,6 +112,13 @@ export function TabsBar() {
             liveTitle={title}
             liveMethod={request.method}
             onSelect={() => switchTo(tab.id)}
+            onRename={(newTitle) => {
+              if (tab.id === storeActiveTabId) {
+                setTitle(newTitle); // debounced flush effect persists it
+              } else {
+                flushDraft({ id: tab.id, title: newTitle, draft: tab.draft });
+              }
+            }}
             onClose={(e) => {
               e.stopPropagation();
               // If this is the active tab, drop its pending flush — it's
@@ -153,6 +161,7 @@ function TabChip({
   liveTitle,
   liveMethod,
   onSelect,
+  onRename,
   onClose,
   onDragStart,
   onDragOver,
@@ -163,6 +172,7 @@ function TabChip({
   liveTitle: string;
   liveMethod: string;
   onSelect: () => void;
+  onRename: (title: string) => void;
   onClose: (e: React.MouseEvent) => void;
   onDragStart: () => void;
   onDragOver: (e: React.DragEvent) => void;
@@ -170,9 +180,18 @@ function TabChip({
 }) {
   const title = isActive ? liveTitle : tab.title;
   const method = isActive ? liveMethod : tab.draft.method;
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(title);
+
+  function commit() {
+    setEditing(false);
+    const next = draftTitle.trim();
+    if (next && next !== title) onRename(next);
+  }
+
   return (
     <div
-      draggable
+      draggable={!editing}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -188,7 +207,31 @@ function TabChip({
       <span className={"shrink-0 rounded border px-1 text-[10px] font-bold " + methodBadgeClasses(method)}>
         {method}
       </span>
-      <span className="min-w-0 flex-1 truncate">{title}</span>
+      {editing ? (
+        <input
+          autoFocus
+          value={draftTitle}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="min-w-0 flex-1 rounded border border-accent/60 bg-transparent px-1 py-0 text-xs focus:outline-none"
+        />
+      ) : (
+        <span
+          className="min-w-0 flex-1 truncate"
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            setDraftTitle(title);
+            setEditing(true);
+          }}
+        >
+          {title}
+        </span>
+      )}
       <button
         type="button"
         onClick={onClose}
