@@ -1,0 +1,66 @@
+# Build + publish a macOS release (universal ARM64+Intel), unsigned by Apple.
+#
+# No Apple Developer ID is involved: with no APPLE_* secrets configured,
+# Tauri ad-hoc-signs the .app, so downloaders must clear Gatekeeper once
+# (right-click > Open, or `xattr -d com.apple.quarantine`). Updater
+# artifacts ARE cryptographically signed — with this repo's Tauri updater
+# key (`TAURI_SIGNING_PRIVATE_KEY` secret, the counterpart of the pubkey
+# in src-tauri/tauri.conf.json), which is unrelated to Apple signing.
+#
+# Trigger: push a `v*` tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`)
+# or run manually via workflow_dispatch. tauri-action creates/updates the
+# GitHub release, uploads the .dmg + .app.tar.gz + .sig, and generates the
+# `latest.json` the updater endpoint in tauri.conf.json already points at.
+
+name: Release (macOS)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Both halves of the universal binary.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # The key is passwordless (see PLAN.md Phase 8 follow-ups); an
+          # explicit empty string stops the CLI from prompting interactively.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          # __VERSION__ resolves to tauri.conf.json's version, so a
+          # workflow_dispatch run (no pushed tag) still creates/updates the
+          # right release. Published (not draft) because the updater endpoint
+          # uses releases/latest/download/latest.json, which drafts don't serve.
+          tagName: v__VERSION__
+          releaseName: "restman v__VERSION__"
+          releaseDraft: false
+          prerelease: false
+          # macOS-only bundles; the config's cross-platform targets list
+          # (msi/deb/...) is irrelevant on this runner.
+          args: --target universal-apple-darwin --bundles app,dmg
