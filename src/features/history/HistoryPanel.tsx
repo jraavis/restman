@@ -45,6 +45,10 @@ export function HistoryPanel() {
   const clearHistory = useClearHistory(workspace?.id);
   const replay = useReplayIntoDraft(workspace?.id);
 
+  // How many times each URL appears in the (filtered) log, to badge repeats.
+  const urlCounts = new Map<string, number>();
+  for (const e of entries ?? []) urlCounts.set(e.url, (urlCounts.get(e.url) ?? 0) + 1);
+
   const [compareMode, setCompareMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [diffPair, setDiffPair] = useState<[HistoryEntry, HistoryEntry] | null>(null);
@@ -200,6 +204,7 @@ export function HistoryPanel() {
           <HistoryRow
             key={entry.id}
             entry={entry}
+            urlCount={urlCounts.get(entry.url) ?? 1}
             onReplay={() => void replay(entry)}
             onDelete={() => deleteEntry.mutate(entry.id)}
             compareMode={compareMode}
@@ -218,6 +223,7 @@ export function HistoryPanel() {
 
 function HistoryRow({
   entry,
+  urlCount,
   onReplay,
   onDelete,
   compareMode,
@@ -225,6 +231,7 @@ function HistoryRow({
   onToggleSelected,
 }: {
   entry: HistoryEntry;
+  urlCount: number;
   onReplay: () => void;
   onDelete: () => void;
   compareMode: boolean;
@@ -258,8 +265,16 @@ function HistoryRow({
         {entry.method}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium text-slate-700 dark:text-slate-200" title={entry.url}>
-          {entry.name}
+        <p className="flex items-center gap-1 font-medium text-slate-700 dark:text-slate-200" title={entry.url}>
+          <span className="min-w-0 truncate">{entry.name}</span>
+          {urlCount > 1 && (
+            <span
+              title={`This URL was used ${urlCount} times`}
+              className="shrink-0 rounded-full bg-slate-100 px-1.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+            >
+              ×{urlCount}
+            </span>
+          )}
         </p>
         <div className="mt-0.5 flex items-center gap-1.5 text-slate-400">
           {entry.status != null ? (
