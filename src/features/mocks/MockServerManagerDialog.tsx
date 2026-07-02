@@ -3,8 +3,11 @@
 //! live loopback socket. Same modal shell as `PluginManagerDialog`.
 
 import { useState } from "react";
-import { Play, Plus, Square, Trash2 } from "lucide-react";
+import { confirmDelete } from "../../lib/confirmDelete";
+import { ChevronDown, ChevronRight, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useCollections } from "../collections/hooks";
+import { KeyValueEditor, type Pair } from "../request/KeyValueEditor";
+import type { HeaderEntry } from "../../lib/http";
 import type { MockRule, MockRuleInput, MockServer, MockServerInput } from "../../lib/types";
 import {
   useCreateMockRule,
@@ -238,7 +241,7 @@ function MockServerEditor({
 
   function remove() {
     if (!server) return;
-    if (window.confirm(`Delete mock server "${server.name}"? This can't be undone.`)) {
+    if (confirmDelete(`Delete mock server "${server.name}"? This can't be undone.`)) {
       deleteServer.mutate(server.id, { onSuccess: onDone });
     }
   }
@@ -316,11 +319,19 @@ function MockServerEditor({
   );
 }
 
+/** `HeaderEntry` (name/value/enabled) ↔ `KeyValueEditor`'s `Pair`
+ * (key/value/enabled) — same mapping convention `RequestBuilder` uses. */
+const headersToPairs = (headers: HeaderEntry[]): Pair[] =>
+  headers.map((h) => ({ key: h.name, value: h.value, enabled: h.enabled }));
+const pairsToHeaders = (pairs: Pair[]): HeaderEntry[] =>
+  pairs.map((p) => ({ name: p.key, value: p.value, enabled: p.enabled }));
+
 function RulesTable({ mockServerId }: { mockServerId: string }) {
   const { data: rules } = useMockRules(mockServerId);
   const createRule = useCreateMockRule(mockServerId);
   const updateRule = useUpdateMockRule(mockServerId);
   const deleteRule = useDeleteMockRule(mockServerId);
+  const [headersOpenId, setHeadersOpenId] = useState<string | null>(null);
 
   function addRule() {
     createRule.mutate(emptyRuleInput(rules?.length ?? 0));
@@ -357,10 +368,8 @@ function RulesTable({ mockServerId }: { mockServerId: string }) {
       <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-700">
         {(rules ?? []).length === 0 && <p className="p-2 text-xs text-slate-400">No rules yet — first match wins.</p>}
         {(rules ?? []).map((rule) => (
-          <div
-            key={rule.id}
-            className="flex items-center gap-1.5 border-b border-slate-100 p-1.5 text-xs last:border-b-0 dark:border-slate-800"
-          >
+          <div key={rule.id} className="border-b border-slate-100 last:border-b-0 dark:border-slate-800">
+          <div className="flex items-center gap-1.5 p-1.5 text-xs">
             <select
               value={rule.method ?? "ANY"}
               onChange={(e) => patchRule(rule, { method: e.target.value === "ANY" ? null : e.target.value })}
@@ -400,11 +409,31 @@ function RulesTable({ mockServerId }: { mockServerId: string }) {
             />
             <button
               type="button"
+              onClick={() => setHeadersOpenId(headersOpenId === rule.id ? null : rule.id)}
+              title="Response headers"
+              className="flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
+            >
+              {headersOpenId === rule.id ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              Headers{rule.headers.length > 0 ? ` (${rule.headers.length})` : ""}
+            </button>
+            <button
+              type="button"
               onClick={() => deleteRule.mutate(rule.id)}
               className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40"
             >
               <Trash2 size={12} />
             </button>
+          </div>
+          {headersOpenId === rule.id && (
+            <div className="px-1.5 pb-1.5">
+              <KeyValueEditor
+                rows={headersToPairs(rule.headers)}
+                onChange={(pairs) => patchRule(rule, { headers: pairsToHeaders(pairs) })}
+                keyPlaceholder="Header name"
+                valuePlaceholder="Header value"
+              />
+            </div>
+          )}
           </div>
         ))}
       </div>

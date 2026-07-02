@@ -4,6 +4,7 @@
 //! `WorkspaceSettingsDialog`/`CookieJarDialog`.
 
 import { useState } from "react";
+import { confirmDelete } from "../../lib/confirmDelete";
 import { Play, Plus, Trash2 } from "lucide-react";
 import { LazyCodeEditor } from "../../components/LazyCodeEditor";
 import { defaultRequest } from "../../lib/http";
@@ -194,7 +195,7 @@ function PluginEditor({
 
   function remove() {
     if (!plugin) return;
-    if (window.confirm(`Delete plugin "${plugin.name}"? This can't be undone.`)) {
+    if (confirmDelete(`Delete plugin "${plugin.name}"? This can't be undone.`)) {
       deletePlugin.mutate(plugin.id, { onSuccess: onDone });
     }
   }

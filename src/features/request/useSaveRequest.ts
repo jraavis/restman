@@ -18,7 +18,7 @@ export function useSaveRequest(workspaceId: string | undefined) {
   const setRequestLink = useRequestStore((s) => s.setRequestLink);
 
   const createRequest = useCreateRequest(workspaceId);
-  const updateRequest = useUpdateRequest();
+  const updateRequest = useUpdateRequest(workspaceId);
   const setTabRequestId = useSetTabRequestId(workspaceId);
 
   const isLinked = requestId !== null;

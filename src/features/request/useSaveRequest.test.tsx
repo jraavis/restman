@@ -13,6 +13,9 @@ vi.mock("../../lib/ipc", () => ({
     createRequest: vi.fn(),
     updateRequest: vi.fn(),
     setTabRequestId: vi.fn(),
+    // Consulted fire-and-forget by triggerLiveSyncIfEnabled after a save.
+    getWorkspaceSettings: vi.fn().mockResolvedValue({ syncMode: "off" }),
+    syncExport: vi.fn(),
   },
 }));
 

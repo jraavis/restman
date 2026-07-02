@@ -195,14 +195,15 @@ export function GrpcMessageBuilder({
           </div>
         )
       ) : (
-        <div className="flex flex-col gap-1">
-          {jsonTextarea}
-          {jsonError && (
-            <p className="rounded-md bg-red-50 px-2 py-1 text-xs text-red-600 dark:bg-red-900/30 dark:text-red-400">
-              {jsonError}
-            </p>
-          )}
-        </div>
+        <div className="flex flex-col gap-1">{jsonTextarea}</div>
+      )}
+
+      {/* Shown in both modes: a JSON parse failure surfaces on the flip back
+          to Form, where the JSON-only branch is no longer rendered. */}
+      {jsonError && (
+        <p className="rounded-md bg-red-50 px-2 py-1 text-xs text-red-600 dark:bg-red-900/30 dark:text-red-400">
+          {jsonError}
+        </p>
       )}
 
       <div className="flex justify-end">

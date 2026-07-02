@@ -23,13 +23,30 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["dmg", "app", "msi", "nsis", "deb", "rpm", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDcxMTZFQTFCRTMxREQ5QUEKUldTcTJSM2pHK29XY1ZVLzRSbmZ1WWRrWVo4emx4NlFuREt6RFNQMzJtMERSWG1iSUNrQVRJcHcK",
+      "endpoints": [
+        "https://github.com/jraavis/restman/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

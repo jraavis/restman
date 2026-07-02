@@ -42,7 +42,7 @@ describe("SettingsDialog", () => {
 
   it("defaults to the General tab", () => {
     renderDialog();
-    expect(screen.getByText("THEME")).toBeTruthy();
+    expect(screen.getByText("Theme")).toBeTruthy();
   });
 
   it("switches to the Editor tab and toggles word wrap", () => {

@@ -4,6 +4,7 @@
 //! `RequestList` for why that's what makes the fetch lazy.
 
 import { useState, type DragEvent, type KeyboardEvent } from "react";
+import { confirmDelete } from "../../lib/confirmDelete";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
@@ -362,7 +363,7 @@ export function CollectionNode({
                 onClick={() => {
                   setMenuOpen(false);
                   if (
-                    window.confirm(
+                    confirmDelete(
                       `Delete "${collection.name}" and everything inside it? This can't be undone.`,
                     )
                   ) {

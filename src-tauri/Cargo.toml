@@ -23,7 +23,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+rusqlite = { version = "0.40.1", features = ["bundled", "backup"] }
 thiserror = "2.0.18"
 uuid = { version = "1.23.3", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "brotli", "deflate", "zstd", "multipart", "stream", "cookies", "system-proxy", "rustls-tls-native-roots"] }
@@ -72,6 +72,13 @@ http = "1"
 # DB-stored rule patterns at runtime (not axum's typed path/query
 # extractors), so only json/tokio/http1 are needed.
 axum = { version = "0.8.9", default-features = false, features = ["json", "tokio", "http1"] }
+# Backup/restore (Phase 8): AES-256 encrypts every entry (the archive always
+# carries real, hydrated secrets, unlike every other export path in this
+# codebase, which masks) so a backup file left on a synced drive or in a
+# Downloads folder doesn't leak plaintext credentials at rest.
+zip = { version = "2.3.0", default-features = false, features = ["aes-crypto", "deflate"] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [dev-dependencies]
 url = "2"

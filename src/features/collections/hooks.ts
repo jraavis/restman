@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc";
+import { triggerLiveSyncIfEnabled } from "../../lib/liveSync";
 import type { AuthConfig, SavedRequestInput } from "../../lib/types";
 
 export const collectionKeys = {
@@ -36,6 +37,7 @@ export function useCreateCollection(workspaceId: string | undefined) {
       ipc.createCollection(workspaceId as string, parentId, name, description),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -47,6 +49,7 @@ export function useUpdateCollection(workspaceId: string | undefined) {
       ipc.updateCollection(id, name, description),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -57,6 +60,7 @@ export function useUpdateCollectionAuth(workspaceId: string | undefined) {
     mutationFn: ({ id, auth }: { id: string; auth: AuthConfig }) => ipc.updateCollectionAuth(id, auth),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -67,6 +71,7 @@ export function useDeleteCollection(workspaceId: string | undefined) {
     mutationFn: (id: string) => ipc.deleteCollection(id),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -78,6 +83,7 @@ export function useMoveCollection(workspaceId: string | undefined) {
       ipc.moveCollection(id, newParentId),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -88,6 +94,7 @@ export function useReorderCollections(workspaceId: string | undefined) {
     mutationFn: (ids: string[]) => ipc.reorderCollections(ids),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -98,6 +105,7 @@ export function useDuplicateCollection(workspaceId: string | undefined) {
     mutationFn: ({ id, newName }: { id: string; newName?: string | null }) => ipc.duplicateCollection(id, newName),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -128,17 +136,22 @@ export function useCreateRequest(workspaceId: string | undefined) {
     onSuccess: (saved) => {
       qc.invalidateQueries({ queryKey: requestKeys.list(saved.collectionId) });
       if (workspaceId) qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
 
-export function useUpdateRequest() {
+/** `workspaceId` is only used to key the live-sync trigger (see
+ * `triggerLiveSyncIfEnabled`) — request-list cache invalidation is scoped
+ * to the request's own `collectionId`, unaffected by whether it's passed. */
+export function useUpdateRequest(workspaceId?: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: SavedRequestInput }) => ipc.updateRequest(id, input),
     onSuccess: (saved) => {
       qc.invalidateQueries({ queryKey: requestKeys.list(saved.collectionId) });
       qc.invalidateQueries({ queryKey: requestKeys.one(saved.id) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -149,6 +162,9 @@ export function useDeleteRequest(collectionId: string | undefined) {
     mutationFn: (id: string) => ipc.deleteRequest(id),
     onSuccess: () => {
       if (collectionId) qc.invalidateQueries({ queryKey: requestKeys.list(collectionId) });
+      // No workspaceId in this hook's signature — liveSync resolves the
+      // active workspace itself (same for move/reorder/duplicate below).
+      triggerLiveSyncIfEnabled(qc);
     },
   });
 }
@@ -160,6 +176,7 @@ export function useMoveRequest() {
     onSuccess: (saved, vars) => {
       qc.invalidateQueries({ queryKey: requestKeys.list(saved.collectionId) });
       qc.invalidateQueries({ queryKey: requestKeys.one(vars.id) });
+      triggerLiveSyncIfEnabled(qc);
     },
   });
 }
@@ -170,6 +187,7 @@ export function useReorderRequests(collectionId: string | undefined) {
     mutationFn: (ids: string[]) => ipc.reorderRequests(ids),
     onSuccess: () => {
       if (collectionId) qc.invalidateQueries({ queryKey: requestKeys.list(collectionId) });
+      triggerLiveSyncIfEnabled(qc);
     },
   });
 }
@@ -180,6 +198,7 @@ export function useDuplicateRequest(collectionId: string | undefined) {
     mutationFn: ({ id, newName }: { id: string; newName?: string | null }) => ipc.duplicateRequest(id, newName),
     onSuccess: () => {
       if (collectionId) qc.invalidateQueries({ queryKey: requestKeys.list(collectionId) });
+      triggerLiveSyncIfEnabled(qc);
     },
   });
 }

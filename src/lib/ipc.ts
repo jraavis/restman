@@ -33,11 +33,14 @@ import type {
   Plugin,
   PluginInput,
   PluginKind,
+  RestoreReport,
   SavedRequest,
   SavedRequestInput,
   SearchHit,
   SendResponse,
   SseEvent,
+  SyncExportReport,
+  SyncImportReport,
   Tab,
   Tag,
   VarScope,
@@ -328,4 +331,18 @@ export const ipc = {
   startMockServer: (id: string) => invoke<number>("start_mock_server", { id }),
   stopMockServer: (id: string) => invoke<void>("stop_mock_server", { id }),
   listRunningMockServerIds: () => invoke<string[]>("list_running_mock_server_ids"),
+
+  // File-based `.restman/` sync (Phase 8) — reads folder path/format from
+  // the workspace's own settings row, so both callers only ever need a
+  // workspace id. `syncExport` doubles as the manual "Sync now" trigger and
+  // the automatic post-mutation call in `syncMode: "live"`.
+  syncExport: (workspaceId: string) => invoke<SyncExportReport>("sync_export", { workspaceId }),
+  syncImport: (workspaceId: string, mode: ConflictMode) =>
+    invoke<SyncImportReport>("sync_import", { workspaceId, mode }),
+
+  // Full-app ZIP backup/restore (Phase 8) — bytes cross IPC base64-encoded,
+  // same convention as `writeFileBytes`.
+  createBackup: (password: string) => invoke<string>("create_backup", { password }),
+  restoreBackup: (contentBase64: string, password: string) =>
+    invoke<RestoreReport>("restore_backup", { contentBase64, password }),
 };

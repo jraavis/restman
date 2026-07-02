@@ -6,13 +6,25 @@
 //! Network's "defaults for new requests" (timeout/redirects/verify-ssl) are
 //! distinct from the per-workspace proxy/client-cert settings in
 //! `WorkspaceSettingsDialog` — this tab only seeds a freshly created
-//! request/tab, it isn't a transport override. Data's retention + clear
-//! action is the full scope for this pass — backup/restore/ZIP export is
-//! Phase 8, not here.
+//! request/tab, it isn't a transport override. Data also carries full-app
+//! ZIP backup/restore (Phase 8) — unlike everything else in this dialog,
+//! that's app-wide (every workspace), not scoped to the active one; see
+//! `crate::backup` module doc for why it bundles real secrets under a
+//! required password instead of following this app's usual mask-on-write
+//! export contract. About carries the auto-update check (Phase 8) — the
+//! signing keypair is real (generated via `tauri signer generate`; the
+//! public half is in `tauri.conf.json`, the private half is
+//! `src-tauri/updater-signing-key.private`, gitignored) but the update
+//! endpoint isn't a published release feed yet, so `check()` will error
+//! until one exists — see PLAN.md's Phase 8 write-up.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import { Minus, Monitor, Moon, Plus, RotateCcw, Sun } from "lucide-react";
 import { COMMANDS, commandForShortcut, normalizeShortcut } from "../../lib/commands";
+import { ipc } from "../../lib/ipc";
 import { Switch } from "../../components/Switch";
 import { useUiStore, type Accent, type Theme } from "../../stores/uiStore";
 import { useClearHistory, useHistoryRetention, useSetHistoryRetention } from "../history/hooks";
@@ -145,10 +157,11 @@ function GeneralTab() {
         <Switch
           checked={confirmBeforeDelete}
           onChange={setConfirmBeforeDelete}
-          label="Confirm before deleting a workspace"
+          label="Confirm before deleting"
         />
         <p className="mt-1 text-xs text-slate-400">
-          Only gates workspace deletion for now — other delete actions still always confirm.
+          Applies to workspaces, collections, requests, environments, tags, plugins, and mock
+          servers. Bulk actions (clear history, restore) always confirm.
         </p>
       </div>
     </div>
@@ -302,6 +315,135 @@ function DataTab({ workspaceId }: { workspaceId?: string }) {
           Clear history for this workspace
         </button>
       </div>
+
+      <BackupSection />
+    </div>
+  );
+}
+
+/** App-wide (every workspace, not just the active one) ZIP backup/restore.
+ * A required password AES-256 encrypts the archive, since — unlike every
+ * other export in this app — it bundles real, unmasked secrets for a true
+ * one-shot local disaster-recovery restore. See `crate::backup`. */
+function BackupSection() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [backupPassword, setBackupPassword] = useState("");
+  const [restorePassword, setRestorePassword] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function createBackup() {
+    if (!backupPassword) {
+      setStatus("Enter a password to protect the backup first.");
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      const contentBase64 = await ipc.createBackup(backupPassword);
+      const path = await save({
+        defaultPath: `restman-backup-${new Date().toISOString().slice(0, 10)}.zip`,
+      });
+      if (!path) return;
+      await ipc.writeFileBytes(path, contentBase64);
+      setStatus("Backup saved.");
+      setBackupPassword("");
+    } catch (e) {
+      setStatus(`Backup failed: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreBackup(file: File) {
+    if (!restorePassword) {
+      setStatus("Enter the backup's password first.");
+      return;
+    }
+    if (
+      !window.confirm(
+        "Restore this backup? It replaces every workspace, collection, environment, and secret currently in the app. This can't be undone.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const contentBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      const report = await ipc.restoreBackup(contentBase64, restorePassword);
+      setStatus(
+        `Restored ${report.workspaces} workspace(s), ${report.collections} collection(s), ` +
+          `${report.requests} request(s), ${report.environments} environment(s), ` +
+          `${report.historyEntries} history entr(y/ies), ${report.secretsRestored} secret(s). Reloading…`,
+      );
+      setRestorePassword("");
+      window.location.reload();
+    } catch (e) {
+      setStatus(`Restore failed: ${e}`);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <SectionLabel>Backup &amp; restore (every workspace)</SectionLabel>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <input
+            type="password"
+            value={backupPassword}
+            onChange={(e) => setBackupPassword(e.target.value)}
+            placeholder="Backup password"
+            className="w-48 rounded-lg border border-slate-200 bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 dark:border-slate-700"
+          />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={createBackup}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+          >
+            Create backup…
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="password"
+            value={restorePassword}
+            onChange={(e) => setRestorePassword(e.target.value)}
+            placeholder="Backup password"
+            className="w-48 rounded-lg border border-slate-200 bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 dark:border-slate-700"
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void restoreBackup(file);
+            }}
+          />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+          >
+            Restore from file…
+          </button>
+        </div>
+
+        {status && <p className="text-xs text-slate-500 dark:text-slate-400">{status}</p>}
+      </div>
     </div>
   );
 }
@@ -415,6 +557,71 @@ function AboutTab() {
       >
         github.com/jraavis/restman
       </a>
+      <UpdateCheck />
+    </div>
+  );
+}
+
+/** Checks the endpoint in `tauri.conf.json`'s `plugins.updater.endpoints`
+ * directly via the JS plugin (`check`/`Update.downloadAndInstall`), same
+ * direct-from-frontend pattern this app already uses for the dialog plugin
+ * (`save`/`open`) — no custom Rust command needed, since the plugin already
+ * only exposes safe, capability-gated operations. */
+function UpdateCheck() {
+  const [status, setStatus] = useState<string | null>(null);
+  const [update, setUpdate] = useState<Awaited<ReturnType<typeof check>> | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function runCheck() {
+    setBusy(true);
+    setStatus("Checking…");
+    try {
+      const found = await check();
+      setUpdate(found);
+      setStatus(found ? `Update available: v${found.version}` : "You're up to date.");
+    } catch (e) {
+      setStatus(`Check failed: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function installAndRestart() {
+    if (!update) return;
+    setBusy(true);
+    setStatus("Downloading…");
+    try {
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch (e) {
+      setStatus(`Install failed: ${e}`);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 border-t border-slate-100 pt-3 dark:border-slate-700">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={runCheck}
+          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+        >
+          Check for updates
+        </button>
+        {update && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={installAndRestart}
+            className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+          >
+            Install &amp; restart
+          </button>
+        )}
+      </div>
+      {status && <p className="mt-1.5 text-xs text-slate-400">{status}</p>}
     </div>
   );
 }

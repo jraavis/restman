@@ -28,7 +28,7 @@ pub use request::{SavedRequest, SavedRequestInput};
 pub use tab::Tab;
 pub use tag::Tag;
 pub use variable::{VarScope, VarType, Variable, VariableInput, SECRET_MASK};
-pub use workspace_settings::{ClientCertConfig, WorkspaceSettings};
+pub use workspace_settings::{ClientCertConfig, SyncFormat, SyncMode, WorkspaceSettings};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

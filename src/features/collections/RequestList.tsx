@@ -4,6 +4,7 @@
 //! without breaking the rules of hooks in `CollectionNode`'s `.map()`.
 
 import type { DragEvent } from "react";
+import { confirmDelete } from "../../lib/confirmDelete";
 import { Loader2 } from "lucide-react";
 import {
   useDeleteRequest,
@@ -34,7 +35,7 @@ export function RequestList({
   const { data: requests, isLoading } = useRequests(collectionId);
   const sortedRequests = requests ? sortRequests(requests, sortMode) : requests;
   const { open } = useOpenRequest(workspaceId);
-  const updateRequest = useUpdateRequest();
+  const updateRequest = useUpdateRequest(workspaceId);
   const duplicateRequest = useDuplicateRequest(collectionId);
   const deleteRequest = useDeleteRequest(collectionId);
   const moveRequest = useMoveRequest();
@@ -124,7 +125,7 @@ export function RequestList({
             }
             onDuplicate={() => duplicateRequest.mutate({ id: request.id })}
             onDelete={() => {
-              if (window.confirm(`Delete "${request.name}"? This can't be undone.`)) {
+              if (confirmDelete(`Delete "${request.name}"? This can't be undone.`)) {
                 deleteRequest.mutate(request.id);
               }
             }}

@@ -5,14 +5,18 @@
 //! this is its first frontend surface.
 
 import { useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   emptyClientCertConfig,
   SECRET_MASK,
   type ClientCertConfig,
   type ClientCertMode,
+  type SyncFormat,
+  type SyncMode,
   type WorkspaceSettings,
 } from "../../lib/types";
 import type { HeaderEntry } from "../../lib/http";
+import { ipc } from "../../lib/ipc";
 import { Field, inputClass, SecretInput } from "../request/AuthConfigFields";
 import { KeyValueEditor, type Pair } from "../request/KeyValueEditor";
 import { useSetWorkspaceSettings, useWorkspaceSettings } from "./hooks";
@@ -100,6 +104,8 @@ function WorkspaceSettingsForm({
         </Field>
 
         <ClientCertFields value={draft.clientCert} onChange={(clientCert) => setDraft({ ...draft, clientCert })} />
+
+        <SyncFields workspaceId={workspaceId} draft={draft} setDraft={setDraft} persisted={initial} />
       </div>
 
       <div className="mt-4 flex justify-end gap-2 text-sm">
@@ -210,6 +216,129 @@ function ClientCertFields({
           </Field>
         </>
       )}
+    </div>
+  );
+}
+
+/** `.restman/` folder sync (Phase 8). Folder path/mode/format are ordinary
+ * draft fields saved by the dialog's own Save button, same as proxy/headers
+ * above; the Sync now / Import buttons act on whatever's currently
+ * *persisted* (`persisted`, not `draft`) since the backend commands read the
+ * saved settings row, not anything still sitting unsaved in this form. */
+function SyncFields({
+  workspaceId,
+  draft,
+  setDraft,
+  persisted,
+}: {
+  workspaceId: string;
+  draft: WorkspaceSettings;
+  setDraft: (next: WorkspaceSettings) => void;
+  persisted: WorkspaceSettings;
+}) {
+  const [status, setStatus] = useState<string | null>(null);
+  const configured = persisted.syncMode !== "off" && !!persisted.syncFolderPath;
+  const unsaved =
+    draft.syncFolderPath !== persisted.syncFolderPath ||
+    draft.syncMode !== persisted.syncMode ||
+    draft.syncFormat !== persisted.syncFormat;
+
+  async function pickFolder() {
+    const picked = await open({ directory: true, multiple: false });
+    if (typeof picked === "string") setDraft({ ...draft, syncFolderPath: picked });
+  }
+
+  async function syncNow() {
+    setStatus("Syncing…");
+    try {
+      const report = await ipc.syncExport(workspaceId);
+      setStatus(`Exported ${report.collections} collection(s), ${report.environments} environment(s).`);
+    } catch (e) {
+      setStatus(`Sync failed: ${e}`);
+    }
+  }
+
+  async function importNow() {
+    if (!window.confirm("Import from the sync folder now? Existing same-name collections/environments are reused, not replaced.")) return;
+    setStatus("Importing…");
+    try {
+      const report = await ipc.syncImport(workspaceId, "skip");
+      setStatus(`Imported ${report.collectionsImported} collection file(s), ${report.environmentsImported} environment file(s).`);
+    } catch (e) {
+      setStatus(`Import failed: ${e}`);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-slate-100 pt-3 dark:border-slate-700">
+      <Field label="Sync folder (.restman/)">
+        <div className="flex gap-2">
+          <input
+            value={draft.syncFolderPath ?? ""}
+            onChange={(e) => setDraft({ ...draft, syncFolderPath: e.target.value || null })}
+            placeholder="Not configured"
+            className={inputClass}
+          />
+          <button
+            type="button"
+            onClick={pickFolder}
+            className="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+          >
+            Choose…
+          </button>
+        </div>
+      </Field>
+
+      <div className="flex gap-3">
+        <Field label="Mode">
+          <select
+            className={inputClass}
+            value={draft.syncMode}
+            onChange={(e) => setDraft({ ...draft, syncMode: e.target.value as SyncMode })}
+          >
+            <option value="off">Off</option>
+            <option value="manual">Manual</option>
+            <option value="live">Live (auto-export on save)</option>
+          </select>
+        </Field>
+        <Field label="Format">
+          <select
+            className={inputClass}
+            value={draft.syncFormat}
+            onChange={(e) => setDraft({ ...draft, syncFormat: e.target.value as SyncFormat })}
+          >
+            <option value="json">JSON</option>
+            <option value="yaml">YAML</option>
+          </select>
+        </Field>
+      </div>
+
+      <p className="text-xs text-slate-400">
+        Collections and environments only — secrets are masked, matching every other export in this app. History
+        never syncs to files; use a full backup for that (Settings → Data).
+      </p>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={!configured}
+          onClick={syncNow}
+          className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+        >
+          Sync now
+        </button>
+        <button
+          type="button"
+          disabled={!configured}
+          onClick={importNow}
+          className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+        >
+          Import from folder
+        </button>
+        {unsaved && <span className="text-xs text-amber-500">Save to apply folder/mode/format changes first.</span>}
+      </div>
+
+      {status && <p className="text-xs text-slate-500 dark:text-slate-400">{status}</p>}
     </div>
   );
 }
