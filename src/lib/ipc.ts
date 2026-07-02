@@ -65,6 +65,8 @@ export interface SendRequestArgs {
   collectionId?: string | null;
   requestId?: string | null;
   name?: string | null;
+  preRequestScript?: string | null;
+  postResponseScript?: string | null;
 }
 
 export const ipc = {

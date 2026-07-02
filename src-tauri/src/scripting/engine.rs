@@ -11,6 +11,8 @@
 //! // Environment
 //! pm.environment.get(key)        // → string | undefined
 //! pm.environment.set(key, value) // recorded in ScriptResult.env_mutations
+//! pm.environment.unset(key)      // recorded in ScriptResult.env_unsets
+//! pm.environment.has(key)        // → boolean
 //!
 //! // Request (pre-script only)
 //! pm.request.method              // string
@@ -43,7 +45,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rquickjs::{
-    CatchResultExt, Context, Function, Object, Runtime, Value,
+    convert::{Coerced, FromJs}, CatchResultExt, Context, Function, Object, Runtime, Value,
 };
 
 use crate::error::{AppError, AppResult};
@@ -66,10 +68,16 @@ const SCRIPT_MAX_STACK_BYTES: usize = 512 * 1024;
 // Internal shared state mutated by pm.* calls during a script run.
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
+enum EnvOp {
+    Set(String, String),
+    Unset(String),
+}
+
 #[derive(Default)]
 struct RunState {
     tests: Vec<TestResult>,
-    env_mutations: Vec<(String, String)>,
+    env_ops: Vec<EnvOp>,
     aborted: bool,
 }
 
@@ -119,7 +127,9 @@ pub fn run_pre_script(
 
     let locked = state.lock().unwrap();
     result.tests = locked.tests.clone();
-    result.env_mutations = locked.env_mutations.clone();
+    let (mutations, unsets) = finalize_env_ops(&locked.env_ops);
+    result.env_mutations = mutations;
+    result.env_unsets = unsets;
     result.aborted = locked.aborted;
     Ok(result)
 }
@@ -163,7 +173,9 @@ pub fn run_post_script(
 
     let locked = state.lock().unwrap();
     result.tests = locked.tests.clone();
-    result.env_mutations = locked.env_mutations.clone();
+    let (mutations, unsets) = finalize_env_ops(&locked.env_ops);
+    result.env_mutations = mutations;
+    result.env_unsets = unsets;
     result.aborted = locked.aborted;
     Ok(result)
 }
@@ -344,6 +356,62 @@ fn inject_pm_post<'js>(
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn env_effective_get(key: &str, snapshot: &HashMap<String, String>, ops: &[EnvOp]) -> Option<String> {
+    let mut val = snapshot.get(key).cloned();
+    for op in ops {
+        match op {
+            EnvOp::Set(k, v) if k == key => val = Some(v.clone()),
+            EnvOp::Unset(k) if k == key => val = None,
+            _ => {}
+        }
+    }
+    val
+}
+
+/// Fold env ops into net mutations (final values) and unsets (keys removed and not re-set).
+fn finalize_env_ops(ops: &[EnvOp]) -> (Vec<(String, String)>, Vec<String>) {
+    let mut map: HashMap<String, String> = HashMap::new();
+    let mut unset_keys: Vec<String> = Vec::new();
+    for op in ops {
+        match op {
+            EnvOp::Set(k, v) => {
+                map.insert(k.clone(), v.clone());
+                unset_keys.retain(|x| x != k);
+            }
+            EnvOp::Unset(k) => {
+                map.remove(k);
+                if !unset_keys.contains(k) {
+                    unset_keys.push(k.clone());
+                }
+            }
+        }
+    }
+    (map.into_iter().collect(), unset_keys)
+}
+
+/// Coerce a JS value to a string using Postman-style semantics.
+fn coerce_to_env_string<'js>(cx: &rquickjs::Ctx<'js>, value: Value<'js>) -> String {
+    if value.is_null() {
+        return "null".to_string();
+    }
+    if value.is_undefined() {
+        return "undefined".to_string();
+    }
+    if value.is_object() && !value.is_function() {
+        let is_array = value.is_array();
+        if let Ok(Some(s)) = cx.json_stringify(value) {
+            return s.to_string().unwrap_or_else(|_| {
+                if is_array { "[]".to_string() } else { "{}".to_string() }
+            });
+        }
+        return if is_array { "[]".to_string() } else { "{}".to_string() };
+    }
+    Coerced::<rquickjs::String>::from_js(cx, value)
+        .ok()
+        .and_then(|c| c.0.to_string().ok())
+        .unwrap_or_default()
+}
+
 fn build_env_object<'js>(
     cx: &rquickjs::Ctx<'js>,
     env: &HashMap<String, String>,
@@ -351,27 +419,40 @@ fn build_env_object<'js>(
 ) -> rquickjs::Result<Object<'js>> {
     let obj = Object::new(cx.clone())?;
 
-    // get(key) → string | undefined
     let snapshot: HashMap<String, String> = env.clone();
+    let snapshot_get = snapshot.clone();
     let state_get = Arc::clone(&state);
     let get_fn = Function::new(cx.clone(), move |key: String| -> Option<String> {
-        // Check mutations first (script may have set it earlier)
         let locked = state_get.lock().unwrap();
-        for (k, v) in locked.env_mutations.iter().rev() {
-            if *k == key {
-                return Some(v.clone());
-            }
-        }
-        snapshot.get(&key).cloned()
+        env_effective_get(&key, &snapshot_get, &locked.env_ops)
     })?;
     obj.set("get", get_fn)?;
 
-    // set(key, value)
-    let state_set = Arc::clone(&state);
-    let set_fn = Function::new(cx.clone(), move |key: String, value: String| {
-        state_set.lock().unwrap().env_mutations.push((key, value));
+    let snapshot_has = snapshot.clone();
+    let state_has = Arc::clone(&state);
+    let has_fn = Function::new(cx.clone(), move |key: String| -> bool {
+        let locked = state_has.lock().unwrap();
+        env_effective_get(&key, &snapshot_has, &locked.env_ops).is_some()
     })?;
+    obj.set("has", has_fn)?;
+
+    let state_set = Arc::clone(&state);
+    let set_fn = Function::new(
+        cx.clone(),
+        move |key: String, value: Value<'_>| -> rquickjs::Result<()> {
+            let cx = value.ctx().clone();
+            let coerced = coerce_to_env_string(&cx, value);
+            state_set.lock().unwrap().env_ops.push(EnvOp::Set(key, coerced));
+            Ok(())
+        },
+    )?;
     obj.set("set", set_fn)?;
+
+    let state_unset = Arc::clone(&state);
+    let unset_fn = Function::new(cx.clone(), move |key: String| {
+        state_unset.lock().unwrap().env_ops.push(EnvOp::Unset(key));
+    })?;
+    obj.set("unset", unset_fn)?;
 
     Ok(obj)
 }
@@ -773,6 +854,66 @@ mod tests {
         ).unwrap();
         assert!(r.tests[0].passed);
         assert_eq!(r.env_mutations, vec![("token".to_string(), "tok-123".to_string())]);
+    }
+
+    #[test]
+    fn pm_environment_set_coerces_types() {
+        let r = run_pre_script(
+            r#"
+            pm.environment.set("num", 42);
+            pm.environment.set("flag", true);
+            pm.environment.set("obj", {a: 1});
+            pm.environment.set("undef", undefined);
+            pm.environment.set("nil", null);
+            "#,
+            &make_pre_ctx(HashMap::new()),
+        ).unwrap();
+        assert!(r.error.is_none(), "{:?}", r.error);
+        let m: HashMap<_, _> = r.env_mutations.into_iter().collect();
+        assert_eq!(m.get("num").map(String::as_str), Some("42"));
+        assert_eq!(m.get("flag").map(String::as_str), Some("true"));
+        assert_eq!(m.get("obj").map(String::as_str), Some(r#"{"a":1}"#));
+        assert_eq!(m.get("undef").map(String::as_str), Some("undefined"));
+        assert_eq!(m.get("nil").map(String::as_str), Some("null"));
+    }
+
+    #[test]
+    fn pm_environment_get_after_set_and_unset() {
+        let mut env = HashMap::new();
+        env.insert("token", "old");
+        let r = run_pre_script(
+            r#"
+            pm.environment.set("token", "new");
+            pm.test("get after set", function() {
+                pm.expect(pm.environment.get("token")).to.equal("new");
+                pm.expect(pm.environment.has("token")).to.be.true;
+            });
+            pm.environment.unset("token");
+            pm.test("get after unset", function() {
+                pm.expect(pm.environment.get("token")).to.be.undefined;
+                pm.expect(pm.environment.has("token")).to.be.false;
+            });
+            "#,
+            &make_pre_ctx(env),
+        ).unwrap();
+        assert!(r.tests.iter().all(|t| t.passed), "{:?}", r.tests);
+        assert!(r.env_mutations.is_empty());
+        assert_eq!(r.env_unsets, vec!["token".to_string()]);
+    }
+
+    #[test]
+    fn pm_environment_unset_then_set() {
+        let mut env = HashMap::new();
+        env.insert("token", "old");
+        let r = run_pre_script(
+            r#"
+            pm.environment.unset("token");
+            pm.environment.set("token", "fresh");
+            "#,
+            &make_pre_ctx(env),
+        ).unwrap();
+        assert_eq!(r.env_mutations, vec![("token".to_string(), "fresh".to_string())]);
+        assert!(r.env_unsets.is_empty());
     }
 
     #[test]

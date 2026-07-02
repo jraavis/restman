@@ -194,6 +194,7 @@ export interface ScriptResult {
   tests: TestResult[];
   error: string | null;
   envMutations: [string, string][];
+  envUnsets: string[];
   aborted: boolean;
 }
 

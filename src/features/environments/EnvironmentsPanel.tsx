@@ -7,7 +7,8 @@
 import { useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
 import { confirmDelete } from "../../lib/confirmDelete";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Check, ChevronDown, ChevronRight, Circle, Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Check, ChevronDown, ChevronRight, Circle, Download, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import { useCollections } from "../collections/hooks";
 import {
@@ -17,6 +18,7 @@ import {
   useEnvironments,
   useSetActiveEnvironment,
   useUpdateEnvironment,
+  variableKeys,
 } from "./hooks";
 import { VariablesEditor } from "./VariablesEditor";
 import { ImportDialog } from "../collections/ImportDialog";
@@ -39,6 +41,15 @@ export function EnvironmentsPanel() {
   const [globalOpen, setGlobalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const qc = useQueryClient();
+
+  function refreshEnvironmentVariables(envId: string) {
+    void qc.invalidateQueries({ queryKey: variableKeys.scope({ kind: "environment", id: envId }) });
+    if (workspaceId) {
+      void qc.invalidateQueries({ queryKey: variableKeys.scope({ kind: "workspace", id: workspaceId }) });
+    }
+    void qc.invalidateQueries({ queryKey: variableKeys.scope({ kind: "global" }) });
+  }
 
   async function exportEnvironment(env: Environment) {
     const content = await ipc.exportEnvironment(env.id);
@@ -126,6 +137,7 @@ export function EnvironmentsPanel() {
                 onSetActive={() => setActiveEnvironment.mutate(env.id === active?.id ? null : env.id)}
                 onSave={(name, groupName) => updateEnvironment.mutate({ id: env.id, name, groupName })}
                 onExport={() => void exportEnvironment(env)}
+                onRefresh={() => refreshEnvironmentVariables(env.id)}
                 onDelete={() => {
                   if (confirmDelete(`Delete "${env.name}"? This can't be undone.`)) {
                     deleteEnvironment.mutate(env.id);
@@ -189,6 +201,7 @@ function EnvironmentRow({
   onSetActive,
   onSave,
   onExport,
+  onRefresh,
   onDelete,
 }: {
   env: Environment;
@@ -198,6 +211,7 @@ function EnvironmentRow({
   onSetActive: () => void;
   onSave: (name: string, groupName: string | null) => void;
   onExport: () => void;
+  onRefresh: () => void;
   onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -285,6 +299,14 @@ function EnvironmentRow({
           </span>
         )}
         <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
+          <button
+            type="button"
+            onClick={onRefresh}
+            title="Refresh variables"
+            className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700"
+          >
+            <RefreshCw size={12} />
+          </button>
           <button
             type="button"
             onClick={onExport}

@@ -21,9 +21,10 @@ pub struct ScriptResult {
     pub tests: Vec<TestResult>,
     /// Any uncaught JS exception or runtime error (not a pm.test failure).
     pub error: Option<String>,
-    /// Variables that the script set via `pm.environment.set`.
-    /// Applied to the resolved env map after the script runs.
+    /// Variables that the script set via `pm.environment.set` (net effect).
     pub env_mutations: Vec<(String, String)>,
+    /// Keys removed via `pm.environment.unset` (net effect — not re-set later).
+    pub env_unsets: Vec<String>,
     /// True if `pm.abort()` was called — the send should be cancelled.
     pub aborted: bool,
 }

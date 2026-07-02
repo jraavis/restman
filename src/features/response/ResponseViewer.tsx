@@ -1,6 +1,7 @@
 //! Response viewer: status line, body (Pretty/Raw/Preview/Hex), headers, timing.
 
 import { useMemo, useState, type ReactNode } from "react";
+import type { editor as MonacoEditor } from "monaco-editor";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   AlertCircle,
@@ -30,7 +31,10 @@ import { statusColor, statusIconName } from "../../lib/methods";
 import { contentTypeOf, extensionFor, monacoLanguageFor, type HttpResponse } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
 import { useRequestStore } from "../../stores/requestStore";
+import { useActiveWorkspace } from "../workspaces/hooks";
 import { TestResultsPanel } from "./TestResultsPanel";
+import { SetVariableDialog } from "./SetVariableDialog";
+import { jsonPathAtOffset, stripJsonStringQuotes, type JsonPath } from "./jsonPath";
 
 type BodyView = "pretty" | "raw" | "preview" | "hex";
 type Tab = "body" | "headers" | "timing" | "tests";
@@ -84,10 +88,16 @@ function ResponseBody({
   preScript: import("../../lib/types").ScriptResult | null;
   postScript: import("../../lib/types").ScriptResult | null;
 }) {
+  const { data: workspace } = useActiveWorkspace();
+  const collectionId = useRequestStore((s) => s.collectionId);
   const [tab, setTab] = useState<Tab>("body");
   const [view, setView] = useState<BodyView>("pretty");
   const [wrap, setWrap] = useState(true);
   const [filter, setFilter] = useState("");
+  const [setVarDialog, setSetVarDialog] = useState<{
+    value: string;
+    jsonPath: JsonPath | null;
+  } | null>(null);
 
   const bytes = useMemo(() => base64ToBytes(response.bodyBase64), [response.bodyBase64]);
   const text = useMemo(() => bytesToText(bytes), [bytes]);
@@ -113,6 +123,16 @@ function ResponseBody({
   const filteredRaw = useMemo(() => filterLines(text, filter), [text, filter]);
 
   const StatusIcon = STATUS_ICONS[statusIconName(response.status)];
+
+  const openSetVariable = (rawValue: string, offset: number | null, sourceText: string) => {
+    const value = stripJsonStringQuotes(rawValue);
+    const baseText = pretty ?? text;
+    const jsonPath =
+      offset != null && prettyJsonText && !filter.trim() && sourceText === baseText
+        ? jsonPathAtOffset(baseText, offset)
+        : null;
+    setSetVarDialog({ value, jsonPath });
+  };
 
   const copy = () => void navigator.clipboard.writeText(text);
   const download = async () => {
@@ -239,11 +259,13 @@ function ResponseBody({
                 view={view}
                 previewText={text}
                 prettyText={filteredPretty}
+                prettySourceText={pretty ?? text}
                 prettyLang={prettyLang}
                 rawText={filteredRaw}
                 rawLang={rawLang}
                 bytes={bytes}
                 wrap={wrap}
+                onSetVariable={openSetVariable}
               />
             </div>
           </div>
@@ -270,6 +292,16 @@ function ResponseBody({
           <TestResultsPanel preScript={preScript} postScript={postScript} />
         )}
       </div>
+
+      {setVarDialog && workspace && (
+        <SetVariableDialog
+          workspaceId={workspace.id}
+          collectionId={collectionId}
+          value={setVarDialog.value}
+          jsonPath={setVarDialog.jsonPath}
+          onClose={() => setSetVarDialog(null)}
+        />
+      )}
     </div>
   );
 }
@@ -295,24 +327,50 @@ function IconButton({
   );
 }
 
+function mountSetVariableAction(
+  editor: MonacoEditor.IStandaloneCodeEditor,
+  sourceText: string,
+  onSetVariable: (value: string, offset: number | null, sourceText: string) => void,
+) {
+  editor.addAction({
+    id: "restman.set-as-variable",
+    label: "Set as variable value",
+    precondition: "editorHasSelection",
+    contextMenuGroupId: "navigation",
+    contextMenuOrder: 1,
+    run: (ed) => {
+      const sel = ed.getSelection();
+      const model = ed.getModel();
+      if (!sel || !model) return;
+      const selected = model.getValueInRange(sel);
+      const offset = model.getOffsetAt(sel.getStartPosition());
+      onSetVariable(selected, offset, sourceText);
+    },
+  });
+}
+
 function BodyContent({
   view,
   previewText,
   prettyText,
+  prettySourceText,
   prettyLang,
   rawText,
   rawLang,
   bytes,
   wrap,
+  onSetVariable,
 }: {
   view: BodyView;
   previewText: string;
   prettyText: string;
+  prettySourceText: string;
   prettyLang: string;
   rawText: string;
   rawLang: string;
   bytes: Uint8Array;
   wrap: boolean;
+  onSetVariable: (value: string, offset: number | null, sourceText: string) => void;
 }) {
   const opts = {
     readOnly: true,
@@ -322,9 +380,25 @@ function BodyContent({
   };
 
   if (view === "pretty")
-    return <LazyCodeEditor language={prettyLang} value={prettyText} options={opts} height="100%" />;
+    return (
+      <LazyCodeEditor
+        language={prettyLang}
+        value={prettyText}
+        options={opts}
+        height="100%"
+        onMount={(editor) => mountSetVariableAction(editor, prettySourceText, onSetVariable)}
+      />
+    );
   if (view === "raw")
-    return <LazyCodeEditor language={rawLang} value={rawText} options={opts} height="100%" />;
+    return (
+      <LazyCodeEditor
+        language={rawLang}
+        value={rawText}
+        options={opts}
+        height="100%"
+        onMount={(editor) => mountSetVariableAction(editor, rawText, onSetVariable)}
+      />
+    );
   if (view === "preview")
     return (
       <iframe
@@ -336,7 +410,16 @@ function BodyContent({
     );
   // hex
   return (
-    <pre className="overflow-auto p-3 font-mono text-xs text-slate-600 dark:text-slate-300">
+    <pre
+      className="overflow-auto p-3 font-mono text-xs text-slate-600 dark:text-slate-300"
+      onContextMenu={(e) => {
+        const sel = window.getSelection()?.toString().trim();
+        if (sel) {
+          e.preventDefault();
+          onSetVariable(sel, null, "");
+        }
+      }}
+    >
       {formatHex(bytes)}
     </pre>
   );
