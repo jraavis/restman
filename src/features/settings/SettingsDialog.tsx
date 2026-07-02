@@ -22,6 +22,7 @@ import { Minus, Monitor, Moon, Plus, RotateCcw, Sun } from "lucide-react";
 import { COMMANDS, commandForShortcut, normalizeShortcut } from "../../lib/commands";
 import { ipc } from "../../lib/ipc";
 import { Switch } from "../../components/Switch";
+import { ExportImportSection } from "./ExportImportSection";
 import { UpdateProgressBar } from "../updates/UpdateProgressBar";
 import { useUpdaterStore } from "../updates/useUpdater";
 import { useUiStore, type Accent, type Theme } from "../../stores/uiStore";
@@ -328,6 +329,8 @@ function DataTab({ workspaceId }: { workspaceId?: string }) {
           Clear history for this workspace
         </button>
       </div>
+
+      <ExportImportSection />
 
       <BackupSection />
     </div>
