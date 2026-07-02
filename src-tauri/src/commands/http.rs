@@ -6,7 +6,9 @@ use crate::model::http::{CookieEntry, HttpRequest, HttpResponse};
 use crate::scripting::{
     run_post_script, run_pre_script, PostScriptContext, PreScriptContext, ScriptResult,
 };
-use crate::store::{collections, history, requests, AppState};
+use crate::model::{VarScope, VarType, VariableInput};
+use crate::store::{collections, environments, history, requests, variables, AppState};
+use rusqlite::Connection;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -35,6 +37,7 @@ pub fn ping() -> String {
 /// run pre/post scripts, send, and record the attempt to history regardless
 /// of outcome.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn send_request(
     state: State<'_, AppState>,
     mut req: HttpRequest,
@@ -42,6 +45,8 @@ pub async fn send_request(
     collection_id: Option<String>,
     request_id: Option<String>,
     name: Option<String>,
+    pre_request_script: Option<String>,
+    post_response_script: Option<String>,
 ) -> AppResult<SendResponse> {
     // 1. Resolve variables and interpolate.
     let resolved = {
@@ -54,13 +59,22 @@ pub async fn send_request(
     //    exchange). Lock is released before any .await.
     req.auth = resolve_auth(&state, collection_id.as_deref(), request_id.as_deref()).await?;
 
-    // 3. Load scripts from the saved request (if any).
-    let (pre_script_src, post_script_src) = if let Some(rid) = request_id.as_deref() {
-        let conn = state.db.lock().unwrap();
-        let saved = requests::get(&conn, rid)?;
-        (saved.pre_request_script, saved.post_response_script)
-    } else {
-        (String::new(), String::new())
+    // 3. Load scripts — prefer non-empty draft overrides, else saved request.
+    let (pre_script_src, post_script_src) = {
+        let (saved_pre, saved_post) = if let Some(rid) = request_id.as_deref() {
+            let conn = state.db.lock().unwrap();
+            let saved = requests::get(&conn, rid)?;
+            (saved.pre_request_script, saved.post_response_script)
+        } else {
+            (String::new(), String::new())
+        };
+        let pre = pre_request_script
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(saved_pre);
+        let post = post_response_script
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(saved_post);
+        (pre, post)
     };
 
     // 4. Run pre-request script.  If it aborts, skip the send.
@@ -180,6 +194,31 @@ pub async fn send_request(
     };
 
     let conn = state.db.lock().unwrap();
+
+    // 7b. Persist script env changes (best-effort).
+    let mut env_mutations: Vec<(String, String)> = Vec::new();
+    let mut env_unsets: Vec<String> = Vec::new();
+    for r in pre_result.iter().chain(post_result.iter()) {
+        for (k, v) in &r.env_mutations {
+            env_mutations.retain(|(key, _)| key != k);
+            env_mutations.push((k.clone(), v.clone()));
+            env_unsets.retain(|key| key != k);
+        }
+        for k in &r.env_unsets {
+            env_mutations.retain(|(key, _)| key != k);
+            if !env_unsets.contains(k) {
+                env_unsets.push(k.clone());
+            }
+        }
+    }
+    let _ = persist_env_mutations(
+        &conn,
+        &workspace_id,
+        collection_id.as_deref(),
+        &env_mutations,
+        &env_unsets,
+    );
+
     match &result {
         Ok(resp) => {
             let _ = history::insert_with_tests(
@@ -212,6 +251,79 @@ pub async fn send_request(
     drop(conn);
 
     result.map(|response| SendResponse { response, pre_script: pre_result, post_script: post_result })
+}
+
+/// Target scope for script-persisted variables: active environment when it
+/// applies to the send's collection, otherwise workspace scope.
+fn persist_scope(
+    conn: &Connection,
+    workspace_id: &str,
+    collection_id: Option<&str>,
+) -> AppResult<VarScope> {
+    if let Some(env) = environments::active_for_workspace(conn, workspace_id)? {
+        let applies = match env.collection_id.as_deref() {
+            None => true,
+            Some(env_cid) => collection_id == Some(env_cid),
+        };
+        if applies {
+            return Ok(VarScope::Environment(env.id));
+        }
+    }
+    Ok(VarScope::Workspace(workspace_id.to_string()))
+}
+
+/// Apply `pm.environment` mutations from a script run to the variables table.
+pub(crate) fn persist_env_mutations(
+    conn: &Connection,
+    workspace_id: &str,
+    collection_id: Option<&str>,
+    mutations: &[(String, String)],
+    unsets: &[String],
+) -> AppResult<()> {
+    if mutations.is_empty() && unsets.is_empty() {
+        return Ok(());
+    }
+    let scope = persist_scope(conn, workspace_id, collection_id)?;
+    let existing: HashMap<String, crate::model::Variable> = variables::list(conn, &scope)?
+        .into_iter()
+        .map(|v| (v.key.clone(), v))
+        .collect();
+
+    for (key, value) in mutations {
+        if let Some(var) = existing.get(key) {
+            variables::update(
+                conn,
+                &var.id,
+                &VariableInput {
+                    key: key.clone(),
+                    value: value.clone(),
+                    var_type: var.var_type,
+                    is_secret: var.is_secret,
+                    enabled: var.enabled,
+                },
+            )?;
+        } else {
+            variables::create(
+                conn,
+                &scope,
+                &VariableInput {
+                    key: key.clone(),
+                    value: value.clone(),
+                    var_type: VarType::String,
+                    is_secret: false,
+                    enabled: true,
+                },
+            )?;
+        }
+    }
+
+    for key in unsets {
+        if let Some(var) = existing.get(key) {
+            variables::delete(conn, &var.id)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Resolves owner + effective `AuthConfig` for a request (collection→request
@@ -330,6 +442,93 @@ pub fn delete_cookie(state: State<'_, AppState>, domain: String, path: String, n
         .map_err(|e| crate::error::AppError::Other(format!("cookie jar lock poisoned: {e}")))?
         .remove(&domain, &path, &name);
     Ok(())
+}
+
+#[cfg(test)]
+mod persist_tests {
+    use super::persist_env_mutations;
+    use crate::model::{VarScope, VarType, VariableInput};
+    use crate::store::{collections, environments, variables, workspaces};
+
+    #[test]
+    fn persists_to_active_environment_when_applicable() {
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = workspaces::ensure_default(&mut conn).unwrap();
+        let env = environments::create(&conn, &ws.id, None, "Dev", None).unwrap();
+        environments::set_active(&mut conn, &ws.id, Some(&env.id)).unwrap();
+
+        persist_env_mutations(&conn, &ws.id, None, &[("token".into(), "abc".into())], &[]).unwrap();
+
+        let vars = variables::list(&conn, &VarScope::Environment(env.id)).unwrap();
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0].key, "token");
+        assert_eq!(vars[0].value, "abc");
+    }
+
+    #[test]
+    fn falls_back_to_workspace_when_env_not_applicable() {
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = workspaces::ensure_default(&mut conn).unwrap();
+        let col = collections::create(&conn, &ws.id, None, "API", None).unwrap();
+        let env = environments::create(&conn, &ws.id, Some(&col.id), "Col env", None).unwrap();
+        environments::set_active(&mut conn, &ws.id, Some(&env.id)).unwrap();
+
+        persist_env_mutations(&conn, &ws.id, None, &[("token".into(), "ws-val".into())], &[]).unwrap();
+
+        let ws_vars = variables::list(&conn, &VarScope::Workspace(ws.id.clone())).unwrap();
+        assert_eq!(ws_vars.len(), 1);
+        assert_eq!(ws_vars[0].value, "ws-val");
+        assert!(variables::list(&conn, &VarScope::Environment(env.id)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn updates_existing_preserving_type_and_secret() {
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = workspaces::ensure_default(&mut conn).unwrap();
+        let var = variables::create(
+            &conn,
+            &VarScope::Workspace(ws.id.clone()),
+            &VariableInput {
+                key: "token".into(),
+                value: "old".into(),
+                var_type: VarType::Json,
+                is_secret: true,
+                enabled: true,
+            },
+        )
+        .unwrap();
+
+        persist_env_mutations(&conn, &ws.id, None, &[("token".into(), "new".into())], &[]).unwrap();
+
+        let updated = variables::get(&conn, &var.id).unwrap();
+        assert_eq!(updated.var_type, VarType::Json);
+        assert!(updated.is_secret);
+        assert_eq!(updated.value, "");
+        let secret = crate::secrets::get(&variables::keychain_key(&var.id)).unwrap().unwrap();
+        assert_eq!(secret, "new");
+    }
+
+    #[test]
+    fn unset_deletes_variable() {
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = workspaces::ensure_default(&mut conn).unwrap();
+        variables::create(
+            &conn,
+            &VarScope::Workspace(ws.id.clone()),
+            &VariableInput {
+                key: "token".into(),
+                value: "gone".into(),
+                var_type: VarType::String,
+                is_secret: false,
+                enabled: true,
+            },
+        )
+        .unwrap();
+
+        persist_env_mutations(&conn, &ws.id, None, &[], &["token".into()]).unwrap();
+
+        assert!(variables::list(&conn, &VarScope::Workspace(ws.id)).unwrap().is_empty());
+    }
 }
 
 #[cfg(test)]

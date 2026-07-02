@@ -1,10 +1,10 @@
-//! History panel: search/filter the auto-saved request log, replay or delete
+//! History panel: search/filter the auto-saved request log, open or delete
 //! entries, clear with confirm.
 
 import { useState } from "react";
-import { AlertCircle, GitCompare, Loader2, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertCircle, ExternalLink, GitCompare, Loader2, Search, Trash2, X } from "lucide-react";
 import { useActiveWorkspace } from "../workspaces/hooks";
-import { useClearHistory, useDeleteHistoryEntry, useHistory, useReplayIntoDraft } from "./hooks";
+import { useClearHistory, useDeleteHistoryEntry, useHistory, useOpenHistoryInTab } from "./hooks";
 import { HTTP_METHODS, methodBadgeClasses, statusColor } from "../../lib/methods";
 import { formatMs } from "../../lib/encoding";
 import { HistoryDiffDialog } from "./HistoryDiffDialog";
@@ -43,7 +43,7 @@ export function HistoryPanel() {
   const { data: entries, isLoading } = useHistory(workspace?.id, filter);
   const deleteEntry = useDeleteHistoryEntry(workspace?.id);
   const clearHistory = useClearHistory(workspace?.id);
-  const replay = useReplayIntoDraft(workspace?.id);
+  const openInTab = useOpenHistoryInTab(workspace?.id);
 
   // How many times each URL appears in the (filtered) log, to badge repeats.
   const urlCounts = new Map<string, number>();
@@ -205,7 +205,7 @@ export function HistoryPanel() {
             key={entry.id}
             entry={entry}
             urlCount={urlCounts.get(entry.url) ?? 1}
-            onReplay={() => void replay(entry)}
+            onOpenInTab={() => openInTab(entry)}
             onDelete={() => deleteEntry.mutate(entry.id)}
             compareMode={compareMode}
             selected={selectedIds.includes(entry.id)}
@@ -224,7 +224,7 @@ export function HistoryPanel() {
 function HistoryRow({
   entry,
   urlCount,
-  onReplay,
+  onOpenInTab,
   onDelete,
   compareMode,
   selected,
@@ -232,7 +232,7 @@ function HistoryRow({
 }: {
   entry: HistoryEntry;
   urlCount: number;
-  onReplay: () => void;
+  onOpenInTab: () => void;
   onDelete: () => void;
   compareMode: boolean;
   selected: boolean;
@@ -291,11 +291,14 @@ function HistoryRow({
         <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
           <button
             type="button"
-            title="Replay"
-            onClick={onReplay}
+            title="Open in new tab"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenInTab();
+            }}
             className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
           >
-            <RotateCcw size={13} />
+            <ExternalLink size={13} />
           </button>
           <button
             type="button"

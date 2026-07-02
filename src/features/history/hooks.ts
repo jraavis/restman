@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc";
 import type { HistoryEntry, HistoryFilter } from "../../lib/types";
-import { useRequestStore } from "../../stores/requestStore";
+import { useCreateTab } from "../tabs/hooks";
 
 export const historyKeys = {
   list: (workspaceId: string, filter: HistoryFilter) => ["history", workspaceId, filter] as const,
@@ -71,44 +71,19 @@ export function useSetHistoryRetention() {
   });
 }
 
-export function useReplayHistoryEntry(workspaceId: string | undefined) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => ipc.replayHistoryEntry(id),
-    onSuccess: () => {
-      if (workspaceId) qc.invalidateQueries({ queryKey: historyKeys.all(workspaceId) });
-    },
-  });
-}
-
-/**
- * Replay a history entry into the live draft so the request builder reflects
- * what's being resent, then fire it and route the result into the same
- * response panel as a normal send — replaying shouldn't show a response that
- * doesn't match what's on screen.
- */
-export function useReplayIntoDraft(workspaceId: string | undefined) {
-  const replay = useReplayHistoryEntry(workspaceId);
-  const loadDraft = useRequestStore((s) => s.loadDraft);
-  const beginSend = useRequestStore((s) => s.beginSend);
-  const setSendResponse = useRequestStore((s) => s.setSendResponse);
-  const setError = useRequestStore((s) => s.setError);
+/** Open a history entry in a new tab without sending. */
+export function useOpenHistoryInTab(workspaceId: string | undefined) {
+  const createTab = useCreateTab(workspaceId);
 
   return useCallback(
-    async (entry: HistoryEntry) => {
-      loadDraft(entry.request, entry.name);
-      beginSend();
-      try {
-        const response = await replay.mutateAsync(entry.id);
-        setSendResponse({
-          response,
-          preScript: null,
-          postScript: null,
-        });
-      } catch (e) {
-        setError(typeof e === "string" ? e : String(e));
-      }
+    (entry: HistoryEntry) => {
+      if (!workspaceId) return;
+      createTab.mutate({
+        requestId: entry.requestId ?? null,
+        title: entry.name,
+        draft: entry.request,
+      });
     },
-    [replay, loadDraft, beginSend, setSendResponse, setError],
+    [workspaceId, createTab],
   );
 }

@@ -10,6 +10,7 @@ function makeResult(overrides: Partial<ScriptResult> = {}): ScriptResult {
     tests: [],
     error: null,
     envMutations: [],
+    envUnsets: [],
     aborted: false,
     ...overrides,
   };
