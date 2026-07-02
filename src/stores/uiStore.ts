@@ -44,6 +44,9 @@ interface UiState {
    * dialog — other delete flows (collections/requests/environments/etc.)
    * don't consult it yet, a known scope limit for this pass. */
   confirmBeforeDelete: boolean;
+  /** Settings → General. When on, `useUpdater`'s startup auto-check runs a
+   * silent `check()` shortly after launch and surfaces `UpdateBanner`. */
+  autoCheckUpdates: boolean;
   defaultRequestOptions: DefaultRequestOptions;
   /** User-remapped shortcuts, keyed by command id (see `lib/commands.ts`).
    * Only holds entries that differ from a command's `defaultShortcut` — the
@@ -59,6 +62,7 @@ interface UiState {
   setEditorTabSize: (size: number) => void;
   setActivePanel: (panel: SidePanel) => void;
   setConfirmBeforeDelete: (confirm: boolean) => void;
+  setAutoCheckUpdates: (check: boolean) => void;
   setDefaultRequestOptions: (options: DefaultRequestOptions) => void;
   setKeybindingOverride: (commandId: string, shortcut: string) => void;
   clearKeybindingOverride: (commandId: string) => void;
@@ -77,6 +81,7 @@ export const useUiStore = create<UiState>()(
       editorTabSize: 2,
       activePanel: "collections",
       confirmBeforeDelete: true,
+      autoCheckUpdates: true,
       defaultRequestOptions: { timeoutSecs: 30, followRedirects: true, verifySsl: true },
       keybindingOverrides: {},
       setTheme: (theme) => set({ theme }),
@@ -89,6 +94,7 @@ export const useUiStore = create<UiState>()(
       setEditorTabSize: (size) => set({ editorTabSize: clamp(size, MIN_TAB_SIZE, MAX_TAB_SIZE) }),
       setActivePanel: (activePanel) => set({ activePanel }),
       setConfirmBeforeDelete: (confirmBeforeDelete) => set({ confirmBeforeDelete }),
+      setAutoCheckUpdates: (autoCheckUpdates) => set({ autoCheckUpdates }),
       setDefaultRequestOptions: (defaultRequestOptions) => set({ defaultRequestOptions }),
       setKeybindingOverride: (commandId, shortcut) =>
         set((s) => ({ keybindingOverrides: { ...s.keybindingOverrides, [commandId]: shortcut } })),

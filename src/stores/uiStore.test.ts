@@ -41,6 +41,12 @@ describe("uiStore", () => {
     expect(useUiStore.getState().editorWordWrap).toBe(true);
   });
 
+  it("sets autoCheckUpdates", () => {
+    expect(useUiStore.getState().autoCheckUpdates).toBe(true);
+    useUiStore.getState().setAutoCheckUpdates(false);
+    expect(useUiStore.getState().autoCheckUpdates).toBe(false);
+  });
+
   it("sets confirmBeforeDelete", () => {
     useUiStore.getState().setConfirmBeforeDelete(false);
     expect(useUiStore.getState().confirmBeforeDelete).toBe(false);

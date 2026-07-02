@@ -4,6 +4,8 @@
 import { useState } from "react";
 import { ResizeHandle } from "../components/ResizeHandle";
 import { CommandPalette } from "../features/commands/CommandPalette";
+import { UpdateBanner } from "../features/updates/UpdateBanner";
+import { useAutoUpdateCheck } from "../features/updates/useUpdater";
 import { useGlobalCommandShortcuts, useRegisterCommand } from "../lib/commands";
 import { useUiStore } from "../stores/uiStore";
 import { RequestPane } from "./RequestPane";
@@ -16,6 +18,7 @@ export function AppShell() {
   const requestSplit = useUiStore((s) => s.requestSplit);
   const setRequestSplit = useUiStore((s) => s.setRequestSplit);
   useGlobalCommandShortcuts();
+  useAutoUpdateCheck();
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   useRegisterCommand("app.commandPalette", () => setPaletteOpen((o) => !o));
@@ -23,6 +26,7 @@ export function AppShell() {
   return (
     <div className="flex h-full flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <UpdateBanner />
       <TopBar />
       <div className="flex min-h-0 flex-1">
         {sidebarOpen && <Sidebar />}
