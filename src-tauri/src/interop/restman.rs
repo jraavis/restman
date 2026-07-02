@@ -492,6 +492,74 @@ mod tests {
         (conn, ws.id)
     }
 
+    /// Regression guard for the exact user-visible bug: a request body
+    /// (every non-None mode) must survive export_full → apply_full into a
+    /// fresh DB — the Body tab showed "None" after a restman import because
+    /// the body was lost somewhere on this path.
+    #[test]
+    fn request_bodies_of_every_mode_survive_a_restman_round_trip() {
+        use crate::model::http::{FormField, KeyValue, RequestBody};
+
+        let (conn, ws_id) = seeded_conn();
+        let bodies: Vec<(&str, RequestBody)> = vec![
+            ("json", RequestBody::Json("{\"a\":1}".into())),
+            ("raw", RequestBody::Raw { content: "hello".into(), language: Some("xml".into()) }),
+            (
+                "urlencoded",
+                RequestBody::UrlEncoded(vec![KeyValue { key: "a".into(), value: "1".into(), enabled: true }]),
+            ),
+            (
+                "formdata",
+                RequestBody::FormData(vec![FormField {
+                    key: "f".into(),
+                    value: "/tmp/x".into(),
+                    enabled: true,
+                    is_file: true,
+                    content_type: None,
+                }]),
+            ),
+            ("binary", RequestBody::Binary { path: "/tmp/file.bin".into() }),
+            (
+                "graphql",
+                RequestBody::Graphql {
+                    query: "{ pets { id } }".into(),
+                    variables: Some("{}".into()),
+                    operation_name: Some("Pets".into()),
+                },
+            ),
+        ];
+        let tree = ImportedNode {
+            name: "Bodies".into(),
+            requests: bodies
+                .iter()
+                .map(|(name, body)| ImportedRequest {
+                    name: (*name).into(),
+                    method: "POST".into(),
+                    url: "https://api.test".into(),
+                    body: body.clone(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        interop::apply_import(&conn, &ws_id, None, &tree, ConflictMode::Skip).unwrap();
+
+        let json = export_full(&conn, &[ws_id], false, false).unwrap();
+
+        let mut fresh = crate::store::db::open_in_memory().unwrap();
+        crate::store::workspaces::ensure_default(&mut fresh).unwrap();
+        apply_full(&fresh, &json, ConflictMode::Skip).unwrap();
+
+        let ws = store::workspaces::list(&fresh).unwrap().into_iter().next().unwrap();
+        let roots = store::collections::list_children(&fresh, &ws.id, None).unwrap();
+        let col = roots.iter().find(|c| c.name == "Bodies").unwrap();
+        let reqs = store::requests::list_by_collection(&fresh, &col.id).unwrap();
+        for (name, expected) in &bodies {
+            let req = reqs.iter().find(|r| r.name == *name).unwrap_or_else(|| panic!("request {name} missing"));
+            assert_eq!(&req.body, expected, "body mode {name} lost or mangled in round trip");
+        }
+    }
+
     /// Two workspaces with nested folders, scripts, secret auth, and secret
     /// variables at every scope.
     fn seed_rich(conn: &mut Connection, default_ws: &str) -> String {

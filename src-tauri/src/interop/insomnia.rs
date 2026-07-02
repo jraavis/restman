@@ -168,8 +168,15 @@ fn parse_url(v: Option<&Value>) -> (String, Vec<KeyValue>, Vec<HeaderEntry>, Vec
 fn parse_body(v: Option<&Value>, headers: &[HeaderEntry], warnings: &mut Vec<String>) -> RequestBody {
     let Some(body) = v else { return RequestBody::None };
     let mime = body.get("mimeType").and_then(Value::as_str).unwrap_or_default().to_ascii_lowercase();
+    // Insomnia's "Text" body type sets `mimeType` to an empty string (not
+    // absent) for freeform bodies with no declared Content-Type. Bailing out
+    // to `RequestBody::None` here unconditionally would silently drop that
+    // text — only treat it as bodyless when there's no `text` either.
     if mime.is_empty() {
-        return RequestBody::None;
+        return match body.get("text").and_then(Value::as_str) {
+            Some(text) if !text.is_empty() => RequestBody::Raw { content: text.to_string(), language: None },
+            _ => RequestBody::None,
+        };
     }
     if mime.contains("json") {
         return RequestBody::Json(body.get("text").and_then(Value::as_str).unwrap_or_default().to_string());
@@ -386,5 +393,28 @@ mod tests {
     fn rejects_non_insomnia_json() {
         let err = parse(r#"{"foo": "bar"}"#).unwrap_err();
         assert!(err.to_string().contains("resources"));
+    }
+
+    /// Regression guard: Insomnia's "Text" body type sets `mimeType` to `""`
+    /// (not absent) for freeform text with no declared Content-Type — that
+    /// must not be treated as "no body" when `text` actually has content.
+    #[test]
+    fn empty_mime_type_with_text_is_imported_as_raw_not_discarded() {
+        let mut warnings = Vec::new();
+        let body = serde_json::json!({ "mimeType": "", "text": "hello world" });
+        assert_eq!(
+            parse_body(Some(&body), &[], &mut warnings),
+            RequestBody::Raw { content: "hello world".into(), language: None }
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn empty_mime_type_with_no_text_is_genuinely_empty() {
+        let mut warnings = Vec::new();
+        let body = serde_json::json!({ "mimeType": "" });
+        assert_eq!(parse_body(Some(&body), &[], &mut warnings), RequestBody::None);
+        assert_eq!(parse_body(None, &[], &mut warnings), RequestBody::None);
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 }

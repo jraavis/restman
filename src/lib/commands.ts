@@ -27,6 +27,7 @@ export interface CommandDef {
 export const COMMANDS: CommandDef[] = [
   { id: "app.commandPalette", label: "Command palette", category: "App", defaultShortcut: "mod+k" },
   { id: "app.openSettings", label: "Open settings", category: "App" },
+  { id: "app.openTools", label: "Developer tools", category: "App" },
   { id: "request.save", label: "Save request", category: "Request", defaultShortcut: "mod+s" },
   { id: "request.send", label: "Send request", category: "Request" },
   { id: "environment.switch", label: "Switch environment", category: "Environment", defaultShortcut: "mod+e" },

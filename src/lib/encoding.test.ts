@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   base64ToBytes,
+  base64UrlToBytes,
+  bytesToBase64Url,
   bytesToText,
+  decodeBase64,
+  encodeBase64,
   filterJsonValue,
   filterLines,
   formatBytes,
   formatHex,
+  minifyJson,
   prettyJson,
   prettyXml,
   textToBase64,
@@ -19,6 +24,22 @@ describe("encoding", () => {
 
   it("encodes text to base64", () => {
     expect(textToBase64("hello")).toBe("aGVsbG8=");
+  });
+
+  it("round-trips base64url", () => {
+    const bytes = new TextEncoder().encode("jwt.payload");
+    expect(bytesToText(base64UrlToBytes(bytesToBase64Url(bytes)))).toBe("jwt.payload");
+  });
+
+  it("decodeBase64 and encodeBase64 return safe results", () => {
+    expect(decodeBase64("aGVsbG8=")).toEqual({ ok: true, value: "hello" });
+    expect(decodeBase64("not!!!")).toEqual({ ok: false, error: "Invalid base64" });
+    expect(encodeBase64("hello")).toEqual({ ok: true, value: "aGVsbG8=" });
+  });
+
+  it("minifies valid JSON", () => {
+    expect(minifyJson('{\n  "a": 1\n}')).toBe('{"a":1}');
+    expect(minifyJson("nope")).toBeNull();
   });
 
   it("round-trips non-ASCII text through textToBase64/base64ToBytes/bytesToText", () => {

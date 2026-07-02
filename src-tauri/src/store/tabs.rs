@@ -70,6 +70,19 @@ pub fn update_draft(conn: &Connection, id: &str, title: &str, draft: &HttpReques
     get(conn, id)
 }
 
+/// Replace the persisted draft of every tab linked to `request_id`. For
+/// flows where the *saved request* is the source of truth and any open tab
+/// is stale — e.g. an import that just overwrote the request in place. The
+/// normal editing flow is the opposite direction (tab draft → `update_draft`)
+/// and must not use this.
+pub fn refresh_drafts_for_request(conn: &Connection, request_id: &str, draft: &HttpRequest) -> AppResult<()> {
+    conn.execute(
+        "UPDATE tabs SET draft_json = ?2, updated_at = ?3 WHERE request_id = ?1",
+        params![request_id, serde_json::to_string(draft)?, now_millis()],
+    )?;
+    Ok(())
+}
+
 /// Link a tab to the request it was just saved as (so future saves overwrite
 /// rather than re-creating a request).
 pub fn set_request_id(conn: &Connection, id: &str, request_id: &str) -> AppResult<Tab> {

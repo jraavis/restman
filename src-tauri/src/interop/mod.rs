@@ -302,6 +302,21 @@ fn apply_node(
                 }
                 ConflictMode::Overwrite => {
                     store::requests::update(conn, &existing.id, &input)?;
+                    // Any open tab linked to this request still carries the
+                    // pre-import draft; left alone, clicking the request
+                    // activates that tab and shows the stale content (e.g. a
+                    // body the import just replaced). The import is the
+                    // source of truth here, so push it into the tab drafts.
+                    let draft = crate::model::http::HttpRequest {
+                        method: input.method.clone(),
+                        url: input.url.clone(),
+                        headers: input.headers.clone(),
+                        query: input.query.clone(),
+                        body: input.body.clone(),
+                        options: input.options.clone(),
+                        auth: Default::default(),
+                    };
+                    store::tabs::refresh_drafts_for_request(conn, &existing.id, &draft)?;
                     report.overwritten += 1;
                     persisted = true;
                 }
@@ -497,6 +512,38 @@ mod tests {
         let roots = store::collections::list_children(&conn, &ws.id, None).unwrap();
         let reqs = store::requests::list_by_collection(&conn, &roots[0].id).unwrap();
         assert!(reqs.iter().any(|r| r.url == "https://changed.test"));
+    }
+
+    /// A tab already open on a request that an Overwrite import just
+    /// replaced must not keep showing the pre-import draft — the classic
+    /// symptom was the Body tab flipping to "None" (the stale draft) even
+    /// though the imported request has a body.
+    #[test]
+    fn reimport_overwrite_mode_refreshes_stale_tab_drafts() {
+        use crate::model::http::{HttpRequest, RequestBody};
+
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
+
+        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip).unwrap();
+        let roots = store::collections::list_children(&conn, &ws.id, None).unwrap();
+        let req = store::requests::list_by_collection(&conn, &roots[0].id)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.name == "Get thing")
+            .unwrap();
+
+        // Open a tab on it with the current (bodyless) draft.
+        let stale_draft = HttpRequest { method: req.method.clone(), url: req.url.clone(), ..Default::default() };
+        let tab = store::tabs::create(&mut conn, &ws.id, Some(&req.id), &req.name, &stale_draft).unwrap();
+
+        // Re-import with a body added, Overwrite mode.
+        let mut second = sample_tree();
+        second.requests[0].body = RequestBody::Json("{\"a\":1}".into());
+        apply_import(&conn, &ws.id, None, &second, ConflictMode::Overwrite).unwrap();
+
+        let refreshed = store::tabs::get(&conn, &tab.id).unwrap();
+        assert_eq!(refreshed.draft.body, RequestBody::Json("{\"a\":1}".into()), "tab draft still stale after overwrite import");
     }
 
     #[test]

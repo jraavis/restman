@@ -3,7 +3,7 @@
 //! settings.
 
 import { useState } from "react";
-import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Puzzle, Radio, Server, Settings, Settings2, Trash2 } from "lucide-react";
+import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Puzzle, Radio, Server, Settings, Settings2, Trash2, Wrench } from "lucide-react";
 import { useRegisterCommand } from "../lib/commands";
 import { confirmDelete } from "../lib/confirmDelete";
 import {
@@ -23,6 +23,7 @@ import { WsPanel } from "../features/streaming/WsPanel";
 import { GrpcPanel } from "../features/streaming/GrpcPanel";
 import { EnvironmentSwitcher } from "../features/environments/EnvironmentSwitcher";
 import { SettingsDialog } from "../features/settings/SettingsDialog";
+import { ToolsDialog } from "../features/tools/ToolsDialog";
 import { useDismissable } from "../lib/useDismissable";
 import { useUiStore } from "../stores/uiStore";
 
@@ -35,6 +36,7 @@ export function TopBar() {
   const deleteWs = useDeleteWorkspace();
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [cookiesOpen, setCookiesOpen] = useState(false);
   const [streamingOpen, setStreamingOpen] = useState(false);
   const [wsOpen, setWsOpen] = useState(false);
@@ -48,6 +50,7 @@ export function TopBar() {
   const wsMenuRef = useDismissable<HTMLDivElement>(() => setWsMenuOpen(false));
 
   useRegisterCommand("app.openSettings", () => setSettingsOpen((o) => !o));
+  useRegisterCommand("app.openTools", () => setToolsOpen((o) => !o));
 
   function commitRename() {
     setRenaming(false);
@@ -209,6 +212,14 @@ export function TopBar() {
         </button>
         <button
           type="button"
+          onClick={() => setToolsOpen(true)}
+          title="Developer tools"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <Wrench size={16} />
+        </button>
+        <button
+          type="button"
           disabled={!active}
           onClick={() => setStreamingOpen(true)}
           title="SSE streaming"
@@ -251,6 +262,7 @@ export function TopBar() {
       </div>
 
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} workspaceId={active?.id} />}
+      {toolsOpen && <ToolsDialog onClose={() => setToolsOpen(false)} />}
       {cookiesOpen && <CookieJarDialog onClose={() => setCookiesOpen(false)} />}
       {streamingOpen && active && (
         <SsePanel workspaceId={active.id} onClose={() => setStreamingOpen(false)} />

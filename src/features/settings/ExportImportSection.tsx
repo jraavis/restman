@@ -11,6 +11,7 @@ import { AlertTriangle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc";
 import { textToBase64 } from "../../lib/encoding";
+import { useRequestStore } from "../../stores/requestStore";
 import { useWorkspaces } from "../workspaces/hooks";
 import type { ConflictMode, FullImportPreview } from "../../lib/types";
 
@@ -158,8 +159,12 @@ function ImportControls() {
       );
       setContent(null);
       setPreview(null);
-      // Names/trees may have changed anywhere — refetch everything scoped.
-      void qc.invalidateQueries();
+      // Names/trees may have changed anywhere — refetch everything, then
+      // force the active tab to reload from its (possibly import-refreshed)
+      // DB draft: an Overwrite import rewrites tab drafts in place, and the
+      // on-screen editor would otherwise keep showing the pre-import content.
+      await qc.invalidateQueries();
+      useRequestStore.setState({ activeTabId: null });
     } catch (e) {
       setStatus(`Import failed: ${e}`);
     } finally {

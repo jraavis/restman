@@ -160,7 +160,14 @@ fn parse_url(v: Option<&Value>) -> (String, Vec<KeyValue>) {
 
 fn parse_body(v: Option<&Value>, warnings: &mut Vec<String>) -> RequestBody {
     let Some(v) = v else { return RequestBody::None };
-    let mode = v.get("mode").and_then(Value::as_str).unwrap_or("");
+    // Well-formed Postman exports always tag the body with `mode`, but
+    // hand-edited or third-party-generated collections sometimes carry the
+    // data (`raw`/`urlencoded`/`formdata`/…) without it. Falling straight to
+    // `RequestBody::None` in that case silently drops real body content —
+    // infer the mode from whichever data key is actually populated instead,
+    // and only land on "no body" when none of them are.
+    let declared_mode = v.get("mode").and_then(Value::as_str).filter(|s| !s.is_empty());
+    let mode = declared_mode.unwrap_or_else(|| infer_body_mode(v));
     match mode {
         "raw" => {
             let content = v.get("raw").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -194,6 +201,26 @@ fn parse_body(v: Option<&Value>, warnings: &mut Vec<String>) -> RequestBody {
             warnings.push(format!("unsupported body mode \"{other}\" — imported with an empty body"));
             RequestBody::None
         }
+    }
+}
+
+/// Best-effort mode guess for a body object with no (or an empty) `mode`
+/// tag, based on which data key is actually populated. Checked in the same
+/// precedence Postman itself uses for `mode`; a body with none of these
+/// populated is genuinely bodyless, not just untagged.
+fn infer_body_mode(v: &Value) -> &'static str {
+    if v.get("raw").and_then(Value::as_str).map(|s| !s.is_empty()).unwrap_or(false) {
+        "raw"
+    } else if v.get("urlencoded").and_then(Value::as_array).map(|a| !a.is_empty()).unwrap_or(false) {
+        "urlencoded"
+    } else if v.get("formdata").and_then(Value::as_array).map(|a| !a.is_empty()).unwrap_or(false) {
+        "formdata"
+    } else if v.get("graphql").and_then(|g| g.get("query")).and_then(Value::as_str).map(|s| !s.is_empty()).unwrap_or(false) {
+        "graphql"
+    } else if v.get("file").and_then(|f| f.get("src")).and_then(Value::as_str).map(|s| !s.is_empty()).unwrap_or(false) {
+        "file"
+    } else {
+        ""
     }
 }
 
@@ -746,5 +773,51 @@ mod tests {
                 KeyValue { key: "b".into(), value: "2".into(), enabled: true },
             ]
         );
+    }
+
+    /// Regression guard: a body object missing the `mode` tag (hand-edited
+    /// or third-party-generated collections) must not silently discard real
+    /// `raw`/`urlencoded`/`formdata`/`graphql`/`file` data just because the
+    /// tag is absent — see `infer_body_mode`.
+    #[test]
+    fn untagged_body_infers_mode_from_populated_data_instead_of_discarding_it() {
+        let mut warnings = Vec::new();
+
+        let raw = json!({ "raw": "{\"a\":1}" });
+        assert_eq!(parse_body(Some(&raw), &mut warnings), RequestBody::Raw { content: "{\"a\":1}".into(), language: None });
+
+        let urlencoded = json!({ "urlencoded": [{"key": "a", "value": "1"}] });
+        assert_eq!(
+            parse_body(Some(&urlencoded), &mut warnings),
+            RequestBody::UrlEncoded(vec![KeyValue { key: "a".into(), value: "1".into(), enabled: true }])
+        );
+
+        let formdata = json!({ "formdata": [{"key": "a", "value": "1", "type": "text"}] });
+        assert_eq!(
+            parse_body(Some(&formdata), &mut warnings),
+            RequestBody::FormData(vec![FormField {
+                key: "a".into(),
+                value: "1".into(),
+                enabled: true,
+                is_file: false,
+                content_type: None,
+            }])
+        );
+
+        let graphql = json!({ "graphql": { "query": "{ pets { id } }" } });
+        assert_eq!(
+            parse_body(Some(&graphql), &mut warnings),
+            RequestBody::Graphql { query: "{ pets { id } }".into(), variables: None, operation_name: None }
+        );
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn body_with_no_mode_and_no_data_is_genuinely_empty() {
+        let mut warnings = Vec::new();
+        assert_eq!(parse_body(Some(&json!({})), &mut warnings), RequestBody::None);
+        assert_eq!(parse_body(None, &mut warnings), RequestBody::None);
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 }
