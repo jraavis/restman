@@ -52,6 +52,73 @@ impl ClientCertConfig {
     }
 }
 
+/// How a workspace's `.restman/` folder relates to the DB — see
+/// `crate::sync` module doc for what each mode actually does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncMode {
+    /// No sync folder configured; `sync_folder_path` is ignored even if set.
+    #[default]
+    Off,
+    /// The user triggers export/import explicitly (buttons in the UI).
+    Manual,
+    /// Same as `Manual`, plus the app automatically re-exports to
+    /// `sync_folder_path` after every collection/environment mutation.
+    /// Import is still always manual — see the migration's module doc.
+    Live,
+}
+
+impl SyncMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SyncMode::Off => "off",
+            SyncMode::Manual => "manual",
+            SyncMode::Live => "live",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "manual" => SyncMode::Manual,
+            "live" => SyncMode::Live,
+            _ => SyncMode::Off,
+        }
+    }
+}
+
+/// File format `crate::sync` writes collections/environments in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncFormat {
+    #[default]
+    Json,
+    /// Git-friendly YAML — same content, easier to diff/review in a PR.
+    Yaml,
+}
+
+impl SyncFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SyncFormat::Json => "json",
+            SyncFormat::Yaml => "yaml",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "yaml" => SyncFormat::Yaml,
+            _ => SyncFormat::Json,
+        }
+    }
+
+    pub fn extension(self) -> &'static str {
+        match self {
+            SyncFormat::Json => "json",
+            SyncFormat::Yaml => "yaml",
+        }
+    }
+}
+
 /// One workspace's transport settings. `default_headers` are plain strings
 /// (no secret treatment) — they're applied to every request unless the
 /// request already carries a same-named header (user value wins).
@@ -68,6 +135,12 @@ pub struct WorkspaceSettings {
     pub default_headers: Vec<HeaderEntry>,
     #[serde(default)]
     pub client_cert: ClientCertConfig,
+    #[serde(default)]
+    pub sync_folder_path: Option<String>,
+    #[serde(default)]
+    pub sync_mode: SyncMode,
+    #[serde(default)]
+    pub sync_format: SyncFormat,
 }
 
 impl WorkspaceSettings {
@@ -78,6 +151,9 @@ impl WorkspaceSettings {
             proxy_bypass: None,
             default_headers: Vec::new(),
             client_cert: ClientCertConfig::None,
+            sync_folder_path: None,
+            sync_mode: SyncMode::Off,
+            sync_format: SyncFormat::Json,
         }
     }
 }

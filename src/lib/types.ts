@@ -133,16 +133,35 @@ export type ClientCertConfig =
   | { mode: "paste"; data: { certPem: string; keyPem: string; passphrase: string | null } }
   | { mode: "path"; data: { certPath: string; keyPath: string; passphrase: string | null } };
 
+/** How this workspace's `.restman/` folder relates to the DB — see the
+ * Rust `crate::sync` module doc for what each mode does. Import is always a
+ * manual, explicit action regardless of mode; only export auto-triggers in
+ * `"live"`. */
+export type SyncMode = "off" | "manual" | "live";
+export type SyncFormat = "json" | "yaml";
+
 export interface WorkspaceSettings {
   workspaceId: string;
   proxyUrl: string | null;
   proxyBypass: string | null;
   defaultHeaders: HeaderEntry[];
   clientCert: ClientCertConfig;
+  syncFolderPath: string | null;
+  syncMode: SyncMode;
+  syncFormat: SyncFormat;
 }
 
 export function emptyWorkspaceSettings(workspaceId: string): WorkspaceSettings {
-  return { workspaceId, proxyUrl: null, proxyBypass: null, defaultHeaders: [], clientCert: { mode: "none" } };
+  return {
+    workspaceId,
+    proxyUrl: null,
+    proxyBypass: null,
+    defaultHeaders: [],
+    clientCert: { mode: "none" },
+    syncFolderPath: null,
+    syncMode: "off",
+    syncFormat: "json",
+  };
 }
 
 /** Fresh `ClientCertConfig` for `mode` — for switching the mode picker
@@ -474,6 +493,30 @@ export interface ImportReport {
   skipped: number;
   overwritten: number;
   warnings: string[];
+}
+
+// ---------------------------------------------------------------------------
+// File-based `.restman/` sync + ZIP backup/restore (Phase 8)
+// ---------------------------------------------------------------------------
+
+export interface SyncExportReport {
+  collections: number;
+  environments: number;
+}
+
+export interface SyncImportReport {
+  collectionsImported: number;
+  environmentsImported: number;
+  warnings: string[];
+}
+
+export interface RestoreReport {
+  secretsRestored: number;
+  workspaces: number;
+  collections: number;
+  requests: number;
+  environments: number;
+  historyEntries: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
 //! TanStack Query hooks for environments and scoped variables.
 
 import { useMemo } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc";
+import { triggerLiveSyncIfEnabled } from "../../lib/liveSync";
 import type { VarScope, VariableInput } from "../../lib/types";
 
 export const environmentKeys = {
@@ -49,6 +50,7 @@ export function useCreateEnvironment(workspaceId: string | undefined) {
     }) => ipc.createEnvironment(workspaceId as string, collectionId, name, groupName),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: environmentKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -60,6 +62,7 @@ export function useUpdateEnvironment(workspaceId: string | undefined) {
       ipc.updateEnvironment(id, name, groupName),
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: environmentKeys.all(workspaceId) });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -73,6 +76,7 @@ export function useDeleteEnvironment(workspaceId: string | undefined) {
         qc.invalidateQueries({ queryKey: environmentKeys.all(workspaceId) });
         qc.invalidateQueries({ queryKey: environmentKeys.active(workspaceId) });
       }
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }
@@ -129,12 +133,22 @@ export function useResolvedVariableKeys(
   }, [global.data, workspace.data, collection.data, environment.data]);
 }
 
+/** Environment-scoped variables are the only variable scope that reaches
+ * the `.restman/` sync files (they're serialized into the per-environment
+ * export; global/workspace/collection variables are not synced at all), so
+ * they're the only scope that live-sync-triggers. The active workspace is
+ * resolved inside the trigger — a `VarScope` alone can't name one. */
+function liveSyncIfEnvScope(qc: QueryClient, scope: VarScope) {
+  if (scope.kind === "environment") triggerLiveSyncIfEnabled(qc);
+}
+
 export function useCreateVariable(scope: VarScope) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: VariableInput) => ipc.createVariable(scope, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: variableKeys.scope(scope) });
+      liveSyncIfEnvScope(qc, scope);
     },
   });
 }
@@ -145,6 +159,7 @@ export function useUpdateVariable(scope: VarScope) {
     mutationFn: ({ id, input }: { id: string; input: VariableInput }) => ipc.updateVariable(id, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: variableKeys.scope(scope) });
+      liveSyncIfEnvScope(qc, scope);
     },
   });
 }
@@ -155,6 +170,7 @@ export function useDeleteVariable(scope: VarScope) {
     mutationFn: (id: string) => ipc.deleteVariable(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: variableKeys.scope(scope) });
+      liveSyncIfEnvScope(qc, scope);
     },
   });
 }

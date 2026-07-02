@@ -4,6 +4,7 @@
 //! every request row and in search results.
 
 import { useState } from "react";
+import { confirmDelete } from "../../lib/confirmDelete";
 import { Check, Plus, X } from "lucide-react";
 import type { SavedRequest, Tag } from "../../lib/types";
 import { useCreateTag, useDeleteTag, useSetRequestTags, useTags } from "./hooks";
@@ -82,7 +83,7 @@ export function TagPicker({
               type="button"
               title="Delete tag"
               onClick={() => {
-                if (window.confirm(`Delete tag "${tag.name}"? Removes it from all requests.`)) {
+                if (confirmDelete(`Delete tag "${tag.name}"? Removes it from all requests.`)) {
                   deleteTag.mutate(tag.id);
                 }
               }}

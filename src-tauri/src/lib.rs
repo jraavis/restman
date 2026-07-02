@@ -1,4 +1,5 @@
 mod auth;
+mod backup;
 mod codegen;
 mod commands;
 mod engine;
@@ -9,6 +10,7 @@ pub mod plugins;
 mod scripting;
 mod secrets;
 mod store;
+mod sync;
 mod util;
 mod vars;
 mod workspace;
@@ -22,6 +24,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Auto-update (Phase 8). `plugins.updater.pubkey` in tauri.conf.json
+        // is a real generated keypair (private half deliberately kept out of
+        // git — see src-tauri/.gitignore), not a placeholder: registering
+        // with an empty/malformed key risks failing at startup, which would
+        // break this repo's own `cargo tauri dev` boot-verification gate.
+        // The endpoint is only ever hit when the frontend calls `check()`
+        // (see `src/features/settings/SettingsDialog.tsx`'s About tab), so
+        // it staying unpublished doesn't affect startup either.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // App-local data dir holds the single SQLite database.
             let dir = app.path().app_data_dir()?;
@@ -145,6 +157,10 @@ pub fn run() {
             commands::start_mock_server,
             commands::stop_mock_server,
             commands::list_running_mock_server_ids,
+            commands::sync_export,
+            commands::sync_import,
+            commands::create_backup,
+            commands::restore_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

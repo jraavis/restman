@@ -143,6 +143,7 @@ mod tests {
             proxy_bypass: Some("localhost".into()),
             default_headers: Vec::new(),
             client_cert: ClientCertConfig::None,
+            ..WorkspaceSettings::empty(&ws)
         };
         workspace_settings::set(&conn, &s).unwrap();
         let t = resolve_transport(&conn, &ws).unwrap().unwrap();
@@ -164,6 +165,7 @@ mod tests {
                 HeaderEntry { name: "X-User-Wins".into(), value: "default".into(), enabled: true },
             ],
             client_cert: ClientCertConfig::None,
+            ..WorkspaceSettings::empty(&ws)
         };
         workspace_settings::set(&conn, &s).unwrap();
 
@@ -186,6 +188,7 @@ mod tests {
             proxy_bypass: None,
             default_headers: vec![HeaderEntry { name: "X-Off".into(), value: "nope".into(), enabled: false }],
             client_cert: ClientCertConfig::None,
+            ..WorkspaceSettings::empty(&ws)
         };
         workspace_settings::set(&conn, &s).unwrap();
 
@@ -211,6 +214,7 @@ mod tests {
                 key_pem: key_pem.into(),
                 passphrase: None,
             },
+            ..WorkspaceSettings::empty(&ws)
         };
         workspace_settings::set(&conn, &s).unwrap();
         let _t = resolve_transport(&conn, &ws).unwrap().unwrap();

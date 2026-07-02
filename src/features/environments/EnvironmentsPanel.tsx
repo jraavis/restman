@@ -5,6 +5,7 @@
 //! creation, with no reassignment path.
 
 import { useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
+import { confirmDelete } from "../../lib/confirmDelete";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Check, ChevronDown, ChevronRight, Circle, Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { useActiveWorkspace } from "../workspaces/hooks";
@@ -126,7 +127,7 @@ export function EnvironmentsPanel() {
                 onSave={(name, groupName) => updateEnvironment.mutate({ id: env.id, name, groupName })}
                 onExport={() => void exportEnvironment(env)}
                 onDelete={() => {
-                  if (window.confirm(`Delete "${env.name}"? This can't be undone.`)) {
+                  if (confirmDelete(`Delete "${env.name}"? This can't be undone.`)) {
                     deleteEnvironment.mutate(env.id);
                   }
                 }}

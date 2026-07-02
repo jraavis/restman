@@ -257,6 +257,18 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_mock_rules_server ON mock_rules(mock_server_id);
     "#,
+    // v8 — file-based `.restman/` sync config, per workspace. One-directional
+    // (DB is always the source of truth): `manual` means the user triggers
+    // export/import explicitly; `live` means the app re-exports to
+    // `sync_folder_path` automatically after every relevant mutation (see
+    // `crate::sync`). There is deliberately no filesystem watcher pulling
+    // external edits back in — that would need a conflict-resolution engine
+    // this phase doesn't build; import always stays a manual, explicit action.
+    r#"
+    ALTER TABLE workspace_settings ADD COLUMN sync_folder_path TEXT;
+    ALTER TABLE workspace_settings ADD COLUMN sync_mode TEXT NOT NULL DEFAULT 'off';
+    ALTER TABLE workspace_settings ADD COLUMN sync_format TEXT NOT NULL DEFAULT 'json';
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

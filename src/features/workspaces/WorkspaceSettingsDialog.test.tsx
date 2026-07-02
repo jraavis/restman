@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ipc } from "../../lib/ipc";
-import { SECRET_MASK, type WorkspaceSettings } from "../../lib/types";
+import { emptyWorkspaceSettings, SECRET_MASK, type WorkspaceSettings } from "../../lib/types";
 import { WorkspaceSettingsDialog } from "./WorkspaceSettingsDialog";
 
 vi.mock("../../lib/ipc", () => ({
@@ -13,14 +13,7 @@ vi.mock("../../lib/ipc", () => ({
 }));
 
 function makeSettings(overrides: Partial<WorkspaceSettings> = {}): WorkspaceSettings {
-  return {
-    workspaceId: "ws-1",
-    proxyUrl: null,
-    proxyBypass: null,
-    defaultHeaders: [],
-    clientCert: { mode: "none" },
-    ...overrides,
-  };
+  return { ...emptyWorkspaceSettings("ws-1"), ...overrides };
 }
 
 function renderWithClient(ui: ReactElement) {

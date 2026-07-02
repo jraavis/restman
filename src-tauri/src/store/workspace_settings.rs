@@ -10,7 +10,7 @@
 //! contract the auth module already follows for OAuth/SigV4 credentials.
 
 use crate::error::AppResult;
-use crate::model::{ClientCertConfig, WorkspaceSettings};
+use crate::model::{ClientCertConfig, SyncFormat, SyncMode, WorkspaceSettings};
 use crate::model::http::HeaderEntry;
 use crate::secrets;
 use crate::model::variable::SECRET_MASK;
@@ -105,18 +105,21 @@ fn persist_cert_secrets(workspace_id: &str, cert: &ClientCertConfig) -> AppResul
 /// should *not* be treated as literal bytes if the secret isn't there yet.
 /// For get/display we return the masked row as-is; hydration happens at send
 /// time (see `hydrate_client_cert_material`).
+type SettingsRow = (Option<String>, Option<String>, String, String, Option<String>, String, String);
+
 pub fn get(conn: &Connection, workspace_id: &str) -> AppResult<WorkspaceSettings> {
-    let row: Option<(Option<String>, Option<String>, String, String)> = conn
+    let row: Option<SettingsRow> = conn
         .query_row(
-            "SELECT proxy_url, proxy_bypass, default_headers_json, client_cert_json
+            "SELECT proxy_url, proxy_bypass, default_headers_json, client_cert_json,
+                    sync_folder_path, sync_mode, sync_format
              FROM workspace_settings WHERE workspace_id = ?1",
             params![workspace_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get(4)?, r.get::<_, String>(5)?, r.get::<_, String>(6)?)),
         )
         .map(Some)
         .or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?;
 
-    let Some((proxy_url, proxy_bypass, headers_json, cert_json)) = row else {
+    let Some((proxy_url, proxy_bypass, headers_json, cert_json, sync_folder_path, sync_mode, sync_format)) = row else {
         return Ok(WorkspaceSettings::empty(workspace_id));
     };
     let default_headers: Vec<HeaderEntry> = serde_json::from_str(&headers_json).unwrap_or_default();
@@ -128,6 +131,9 @@ pub fn get(conn: &Connection, workspace_id: &str) -> AppResult<WorkspaceSettings
         proxy_bypass,
         default_headers,
         client_cert,
+        sync_folder_path,
+        sync_mode: SyncMode::parse(&sync_mode),
+        sync_format: SyncFormat::parse(&sync_format),
     })
 }
 
@@ -138,14 +144,20 @@ pub fn set(conn: &Connection, settings: &WorkspaceSettings) -> AppResult<Workspa
     let headers_json = serde_json::to_string(&settings.default_headers).unwrap_or_else(|_| "[]".into());
     let cert_json = serde_json::to_string(&masked_cert).unwrap_or_else(|_| r#"{"mode":"none"}"#.into());
     conn.execute(
-        "INSERT INTO workspace_settings (workspace_id, proxy_url, proxy_bypass, default_headers_json, client_cert_json)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO workspace_settings (workspace_id, proxy_url, proxy_bypass, default_headers_json, client_cert_json, sync_folder_path, sync_mode, sync_format)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(workspace_id) DO UPDATE SET
             proxy_url = excluded.proxy_url,
             proxy_bypass = excluded.proxy_bypass,
             default_headers_json = excluded.default_headers_json,
-            client_cert_json = excluded.client_cert_json",
-        params![settings.workspace_id, settings.proxy_url, settings.proxy_bypass, headers_json, cert_json],
+            client_cert_json = excluded.client_cert_json,
+            sync_folder_path = excluded.sync_folder_path,
+            sync_mode = excluded.sync_mode,
+            sync_format = excluded.sync_format",
+        params![
+            settings.workspace_id, settings.proxy_url, settings.proxy_bypass, headers_json, cert_json,
+            settings.sync_folder_path, settings.sync_mode.as_str(), settings.sync_format.as_str()
+        ],
     )?;
     // Return the persisted (masked) view so the caller (IPC) reflects what was
     // actually stored, not the plaintext it was handed.
@@ -197,6 +209,7 @@ mod tests {
                 HeaderEntry { name: "X-Off".into(), value: "1".into(), enabled: false },
             ],
             client_cert: ClientCertConfig::None,
+            ..WorkspaceSettings::empty(&ws)
         };
         let saved = set(&conn, &s).unwrap();
         assert_eq!(saved.proxy_url.as_deref(), Some("http://proxy.corp:8080"));
@@ -220,6 +233,7 @@ mod tests {
                 key_pem: "-----BEGIN PRIVATE KEY-----\nreal\n-----END PRIVATE KEY-----\n".into(),
                 passphrase: Some("hunter2".into()),
             },
+            ..WorkspaceSettings::empty(&ws)
         };
         let saved = set(&conn, &s).unwrap();
         // DB-facing view is masked.
@@ -254,6 +268,7 @@ mod tests {
                 key_pem: "-----BEGIN PRIVATE KEY-----\nreal\n-----END PRIVATE KEY-----\n".into(),
                 passphrase: Some("hunter2".into()),
             },
+            ..WorkspaceSettings::empty(&ws)
         };
         let saved = set(&conn, &s).unwrap();
 
@@ -298,6 +313,7 @@ mod tests {
                 key_pem: "-----BEGIN PRIVATE KEY-----\nreal\n-----END PRIVATE KEY-----\n".into(),
                 passphrase: Some("hunter2".into()),
             },
+            ..WorkspaceSettings::empty(&ws)
         };
         set(&conn, &pasted).unwrap();
         // Sanity check: the keychain actually holds the pasted bytes before we
@@ -328,6 +344,7 @@ mod tests {
                 key_pem: "-----BEGIN PRIVATE KEY-----\nreal\n-----END PRIVATE KEY-----\n".into(),
                 passphrase: Some(String::new()),
             },
+            ..WorkspaceSettings::empty(&ws)
         };
         let saved = set(&conn, &s).unwrap();
         match &saved.client_cert {
