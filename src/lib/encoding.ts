@@ -1,6 +1,8 @@
 //! Helpers for converting between text/bytes and the base64 the backend
 //! reads (file writes) and sends (response bodies).
 
+export type ToolResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
 export function base64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
@@ -20,10 +22,55 @@ export function textToBase64(text: string): string {
   return btoa(bin);
 }
 
+function normalizeBase64Url(input: string): string {
+  const b64 = input.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = b64.length % 4;
+  if (pad === 0) return b64;
+  return b64 + "=".repeat(4 - pad);
+}
+
+export function base64UrlToBytes(input: string): Uint8Array {
+  return base64ToBytes(normalizeBase64Url(input.trim()));
+}
+
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function decodeBase64(input: string): ToolResult<string> {
+  const trimmed = input.trim();
+  if (!trimmed) return { ok: false, error: "Input is empty" };
+  try {
+    return { ok: true, value: bytesToText(base64ToBytes(trimmed)) };
+  } catch {
+    return { ok: false, error: "Invalid base64" };
+  }
+}
+
+export function encodeBase64(input: string): ToolResult<string> {
+  if (!input) return { ok: true, value: "" };
+  try {
+    return { ok: true, value: textToBase64(input) };
+  } catch {
+    return { ok: false, error: "Could not encode to base64" };
+  }
+}
+
 /** Reformat JSON text with indentation; returns null if not valid JSON. */
 export function prettyJson(text: string): string | null {
   try {
     return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return null;
+  }
+}
+
+/** Minify JSON text to a single line; returns null if not valid JSON. */
+export function minifyJson(text: string): string | null {
+  try {
+    return JSON.stringify(JSON.parse(text));
   } catch {
     return null;
   }
