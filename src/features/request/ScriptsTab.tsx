@@ -86,12 +86,7 @@ function ScriptPane({
       </div>
 
       {/* Editor */}
-      <div className="relative min-h-0 flex-1">
-        {value === "" && (
-          <pre className="pointer-events-none absolute inset-0 z-10 overflow-hidden p-2 font-mono text-xs leading-relaxed text-slate-400 dark:text-slate-600 select-none">
-            {placeholder}
-          </pre>
-        )}
+      <div className="min-h-0 flex-1">
         <Suspense
           fallback={
             <div className="flex h-full items-center justify-center text-xs text-slate-400">
@@ -101,6 +96,7 @@ function ScriptPane({
         >
           <LazyCodeEditor
             value={value}
+            placeholder={placeholder}
             onChange={(v) => onChange(v ?? "")}
             language="javascript"
             options={{
