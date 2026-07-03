@@ -12,6 +12,7 @@ import { useAppMenu } from "./useAppMenu";
 import { RequestPane } from "./RequestPane";
 import { ResponsePanel } from "./ResponsePanel";
 import { Sidebar } from "./Sidebar";
+import { Watermark } from "../components/Watermark";
 import { TopBar } from "./TopBar";
 
 export function AppShell() {
@@ -30,11 +31,12 @@ export function AppShell() {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <UpdateBanner />
       <TopBar />
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
+        <Watermark />
         {sidebarOpen && <Sidebar />}
         <main
           id="main-column"
-          className="grid min-w-0 flex-1"
+          className="relative z-10 grid min-w-0 flex-1"
           style={{ gridTemplateRows: `${requestSplit * 100}% auto ${(1 - requestSplit) * 100}%` }}
         >
           <div className="min-h-0 overflow-hidden">

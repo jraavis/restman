@@ -24,8 +24,12 @@ import { GrpcPanel } from "../features/streaming/GrpcPanel";
 import { EnvironmentSwitcher } from "../features/environments/EnvironmentSwitcher";
 import { SettingsDialog } from "../features/settings/SettingsDialog";
 import { ToolsDialog } from "../features/tools/ToolsDialog";
+import { WindowControls } from "../components/WindowControls";
 import { useDismissable } from "../lib/useDismissable";
 import { useUiStore } from "../stores/uiStore";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+
+const isMac = /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
 
 export function TopBar() {
   const { data: workspaces } = useWorkspaces();
@@ -71,6 +75,8 @@ export function TopBar() {
 
   return (
     <header className="relative flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3 dark:border-slate-800 dark:bg-slate-900">
+      {isMac && <WindowControls />}
+
       <button
         type="button"
         onClick={toggleSidebar}
@@ -80,7 +86,10 @@ export function TopBar() {
         <PanelLeft size={16} />
       </button>
 
-      <div className="flex items-center gap-1.5 pr-1">
+      <div
+        data-tauri-drag-region
+        className="flex items-center gap-1.5 pr-1"
+      >
         <img src="/restman.png" alt="" className="h-6 w-6 rounded-md" />
         <span className="font-semibold tracking-tight text-slate-800 dark:text-slate-100">
           Restman
@@ -200,7 +209,13 @@ export function TopBar() {
         </div>
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div
+        data-tauri-drag-region
+        className="min-h-full min-w-0 flex-1"
+        onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+      />
+
+      <div className="flex items-center gap-2">
         <EnvironmentSwitcher workspaceId={active?.id} />
         <button
           type="button"
@@ -259,6 +274,7 @@ export function TopBar() {
         >
           <Settings size={16} />
         </button>
+        {!isMac && <WindowControls />}
       </div>
 
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} workspaceId={active?.id} />}

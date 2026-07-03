@@ -21,7 +21,7 @@ export function Sidebar() {
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
 
   return (
-    <div className="flex shrink-0 border-r border-slate-200 dark:border-slate-800">
+    <div className="relative z-10 flex shrink-0 border-r border-slate-200 dark:border-slate-800">
       <aside
         style={{ width: sidebarWidth }}
         className="flex shrink-0 flex-col bg-white dark:bg-slate-900"
