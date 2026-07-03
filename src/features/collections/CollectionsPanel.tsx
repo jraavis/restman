@@ -3,7 +3,7 @@
 //! it. Replaces the old "Coming in Phase 2." placeholder in `Sidebar`.
 
 import { useRef, useState, type KeyboardEvent } from "react";
-import { ArrowDownUp, FolderPlus, Loader2, Search, Upload } from "lucide-react";
+import { ArrowDownUp, ChevronDown, FolderPlus, Loader2, Search, Upload } from "lucide-react";
 import { HTTP_METHODS } from "../../lib/methods";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import { useCollections, useCreateCollection, useMoveCollection, useTags } from "./hooks";
@@ -73,18 +73,26 @@ export function CollectionsPanel() {
         <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Collections</span>
         <div className="flex items-center gap-1">
           <div className="relative">
-            <ArrowDownUp size={11} className="pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <select
               value={sortMode}
               onChange={(e) => setSortMode(e.target.value as SortMode)}
               title="Sort collections and requests"
-              className="rounded-md border border-slate-200 bg-transparent py-1 pl-5 pr-1.5 text-[11px] focus:outline-none focus:ring-2 focus:ring-accent/40 dark:border-slate-700"
+              aria-label="Sort collections and requests"
+              className="appearance-none rounded-md border border-slate-200 bg-white py-1 pl-6 pr-5 text-[11px] text-slate-600 focus:outline-none focus:ring-2 focus:ring-accent/40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
             >
               <option value="manual">Manual</option>
               <option value="name">Name</option>
               <option value="created">Created</option>
               <option value="used">Last used</option>
             </select>
+            <ArrowDownUp
+              size={12}
+              className="pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+            />
+            <ChevronDown
+              size={11}
+              className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+            />
           </div>
           <button
             type="button"
