@@ -55,7 +55,9 @@ pub enum CodeLanguage {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CodegenTarget {
     Native { language: CodeLanguage },
-    Plugin { plugin_id: String },
+    /// `pluginId` on the wire — the frontend is camelCase throughout; Tauri
+    /// only auto-converts top-level command args, not nested enum fields.
+    Plugin { #[serde(rename = "pluginId")] plugin_id: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -451,5 +453,12 @@ mod tests {
     #[test]
     fn shquote_only_escapes_single_quote() {
         assert_eq!(shquote("a'b\\c"), "'a'\\''b\\c'");
+    }
+
+    #[test]
+    fn codegen_target_deserializes_frontend_camel_case_plugin_id() {
+        let target: CodegenTarget =
+            serde_json::from_str(r#"{"kind":"plugin","pluginId":"plug-1"}"#).unwrap();
+        assert!(matches!(target, CodegenTarget::Plugin { plugin_id } if plugin_id == "plug-1"));
     }
 }
