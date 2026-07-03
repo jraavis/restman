@@ -4,11 +4,28 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc";
+import { useRequestStore } from "../../stores/requestStore";
 import type { HttpRequest } from "../../lib/http";
 
 export const tabKeys = {
   all: (workspaceId: string) => ["tabs", workspaceId] as const,
 };
+
+/** Persist the live draft to its tab row right now, bypassing the 500ms
+ * debounce in `TabsBar`. Every path that switches away from the active tab
+ * (tab strip, sidebar request click, history open, new tab) must flush
+ * first — otherwise `useTabSync` reloads the incoming tab over the store
+ * and the newest edits (classically: a just-typed body) are silently lost. */
+async function flushLiveDraft(): Promise<void> {
+  const { activeTabId, title, request } = useRequestStore.getState();
+  if (!activeTabId) return;
+  try {
+    await ipc.updateTabDraft(activeTabId, title, request);
+  } catch {
+    // Tab row may already be gone (e.g. switching because it was closed) —
+    // losing this flush is then correct, not an error worth surfacing.
+  }
+}
 
 export function useTabs(workspaceId: string | undefined) {
   return useQuery({
@@ -21,8 +38,12 @@ export function useTabs(workspaceId: string | undefined) {
 export function useCreateTab(workspaceId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ requestId, title, draft }: { requestId: string | null; title: string; draft: HttpRequest }) =>
-      ipc.createTab(workspaceId as string, requestId, title, draft),
+    mutationFn: async ({ requestId, title, draft }: { requestId: string | null; title: string; draft: HttpRequest }) => {
+      // Creating a tab also activates it — same switch-away hazard as
+      // `useSetActiveTab`, so the outgoing draft flushes first.
+      await flushLiveDraft();
+      return ipc.createTab(workspaceId as string, requestId, title, draft);
+    },
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: tabKeys.all(workspaceId) });
     },
@@ -53,7 +74,10 @@ export function useSetTabRequestId(workspaceId: string | undefined) {
 export function useSetActiveTab(workspaceId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => ipc.setActiveTab(workspaceId as string, id),
+    mutationFn: async (id: string) => {
+      await flushLiveDraft();
+      return ipc.setActiveTab(workspaceId as string, id);
+    },
     onSuccess: () => {
       if (workspaceId) qc.invalidateQueries({ queryKey: tabKeys.all(workspaceId) });
     },

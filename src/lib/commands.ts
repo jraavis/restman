@@ -32,6 +32,7 @@ export const COMMANDS: CommandDef[] = [
   { id: "request.send", label: "Send request", category: "Request" },
   { id: "environment.switch", label: "Switch environment", category: "Environment", defaultShortcut: "mod+e" },
   { id: "tab.new", label: "New tab", category: "Tabs" },
+  { id: "tab.close", label: "Close tab", category: "Tabs", defaultShortcut: "mod+w" },
   ...Array.from({ length: 9 }, (_, i) => ({
     id: `tab.switchTo.${i + 1}`,
     label: `Switch to tab ${i + 1}`,

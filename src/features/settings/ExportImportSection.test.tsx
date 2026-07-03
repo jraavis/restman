@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ExportImportSection } from "./ExportImportSection";
+import { ExportImportSection, formatImportStatus } from "./ExportImportSection";
 import { ipc } from "../../lib/ipc";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { FullImportPreview, FullImportReport } from "../../lib/types";
@@ -129,9 +129,35 @@ describe("ExportImportSection", () => {
     await waitFor(() =>
       expect(ipc.applyRestmanImport).toHaveBeenCalledWith('{"restmanExportVersion":1}', "overwrite"),
     );
-    await screen.findByText(/Imported 1 new workspace\(s\), 3 collection\(s\)/);
+    await screen.findByText(/1 workspace\(s\) created, 3 collection\(s\) created/);
     // Preview panel is gone after a successful apply.
     expect(screen.queryByText("exists — will merge")).toBeNull();
+  });
+
+  it("formatImportStatus reports overwrites — an all-overwrite import must not read as 'Imported 0'", () => {
+    const overwriteOnly: FullImportReport = {
+      ...REPORT,
+      workspacesCreated: 0,
+      createdCollections: 0,
+      createdRequests: 0,
+      environmentsCreated: 0,
+      variablesCreated: 0,
+      overwritten: 7,
+      variablesOverwritten: 3,
+    };
+    const msg = formatImportStatus(overwriteOnly);
+    expect(msg).toContain("7 request(s) overwritten");
+    expect(msg).toContain("3 variable(s) overwritten");
+    expect(msg).not.toContain("Imported 0");
+
+    const nothing: FullImportReport = {
+      ...overwriteOnly,
+      overwritten: 0,
+      variablesOverwritten: 0,
+      skipped: 0,
+      variablesSkipped: 0,
+    };
+    expect(formatImportStatus(nothing)).toContain("nothing changed");
   });
 
   it("surfaces a preview error for an invalid file", async () => {

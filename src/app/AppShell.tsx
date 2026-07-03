@@ -8,6 +8,7 @@ import { UpdateBanner } from "../features/updates/UpdateBanner";
 import { useAutoUpdateCheck } from "../features/updates/useUpdater";
 import { useGlobalCommandShortcuts, useRegisterCommand } from "../lib/commands";
 import { useUiStore } from "../stores/uiStore";
+import { useAppMenu } from "./useAppMenu";
 import { RequestPane } from "./RequestPane";
 import { ResponsePanel } from "./ResponsePanel";
 import { Sidebar } from "./Sidebar";
@@ -18,6 +19,7 @@ export function AppShell() {
   const requestSplit = useUiStore((s) => s.requestSplit);
   const setRequestSplit = useUiStore((s) => s.setRequestSplit);
   useGlobalCommandShortcuts();
+  useAppMenu();
   useAutoUpdateCheck();
 
   const [paletteOpen, setPaletteOpen] = useState(false);
