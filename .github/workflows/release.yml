@@ -3,12 +3,14 @@
 # No Apple Developer ID is involved: with no APPLE_* secrets configured,
 # Tauri ad-hoc-signs the .app, so downloaders must clear Gatekeeper once
 # (right-click > Open, or `xattr -d com.apple.quarantine`). Updater
-# Updater signature artifacts (.sig, latest.json) are disabled
-# (`createUpdaterArtifacts: false` in tauri.conf.json).
+# artifacts ARE cryptographically signed — with this repo's Tauri updater
+# key (`TAURI_SIGNING_PRIVATE_KEY` secret, the counterpart of the pubkey
+# in src-tauri/tauri.conf.json), which is unrelated to Apple signing.
 #
 # Trigger: push a `v*` tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`)
 # or run manually via workflow_dispatch. tauri-action creates/updates the
-# GitHub release and uploads the .dmg (no updater .sig / latest.json).
+# GitHub release, uploads the .dmg + .app.tar.gz + .sig, and generates the
+# `latest.json` the updater endpoint in tauri.conf.json already points at.
 
 name: Release (macOS)
 
@@ -46,6 +48,10 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # The key is passwordless (see PLAN.md Phase 8 follow-ups); an
+          # explicit empty string stops the CLI from prompting interactively.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           # __VERSION__ resolves to tauri.conf.json's version, so a
           # workflow_dispatch run (no pushed tag) still creates/updates the
