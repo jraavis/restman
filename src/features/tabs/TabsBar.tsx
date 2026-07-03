@@ -72,6 +72,23 @@ export function TabsBar() {
   tabsRef.current = tabs;
   const switchToRef = useRef(switchTo);
   switchToRef.current = switchTo;
+  const storeActiveTabIdRef = useRef(storeActiveTabId);
+  storeActiveTabIdRef.current = storeActiveTabId;
+  const closeTabRef = useRef(closeTab);
+  closeTabRef.current = closeTab;
+
+  function closeActiveTab(tabId?: string) {
+    const id = tabId ?? storeActiveTabIdRef.current;
+    if (!id) return;
+    if (id === storeActiveTabIdRef.current && flushTimer.current) {
+      clearTimeout(flushTimer.current);
+      flushTimer.current = null;
+    }
+    closeTabRef.current.mutate(id);
+  }
+
+  const closeActiveTabRef = useRef(closeActiveTab);
+  closeActiveTabRef.current = closeActiveTab;
 
   useRegisterCommands({
     ...Object.fromEntries(
@@ -84,6 +101,7 @@ export function TabsBar() {
       ]),
     ),
     "tab.new": () => createTab.mutate({ requestId: null, title: "Untitled", draft: defaultRequest(defaultRequestOptions) }),
+    "tab.close": () => closeActiveTabRef.current(),
   });
 
   const dragIndex = useRef<number | null>(null);
@@ -121,14 +139,7 @@ export function TabsBar() {
             }}
             onClose={(e) => {
               e.stopPropagation();
-              // If this is the active tab, drop its pending flush — it's
-              // about to be deleted, and a flush landing after that would
-              // hit a NotFound update.
-              if (tab.id === storeActiveTabId && flushTimer.current) {
-                clearTimeout(flushTimer.current);
-                flushTimer.current = null;
-              }
-              closeTab.mutate(tab.id);
+              closeActiveTab(tab.id);
             }}
             onDragStart={() => {
               dragIndex.current = index;

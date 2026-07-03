@@ -13,7 +13,30 @@ import { ipc } from "../../lib/ipc";
 import { textToBase64 } from "../../lib/encoding";
 import { useRequestStore } from "../../stores/requestStore";
 import { useWorkspaces } from "../workspaces/hooks";
-import type { ConflictMode, FullImportPreview } from "../../lib/types";
+import type { ConflictMode, FullImportPreview, FullImportReport } from "../../lib/types";
+
+/** Human status line covering every outcome the report can carry — an
+ * Overwrite import into an existing workspace legitimately *creates*
+ * nothing (everything lands in `overwritten`), and showing only created
+ * counts made a successful import read as "Imported 0 …". */
+export function formatImportStatus(report: FullImportReport): string {
+  const parts: string[] = [];
+  if (report.workspacesCreated > 0) parts.push(`${report.workspacesCreated} workspace(s) created`);
+  if (report.createdCollections > 0) parts.push(`${report.createdCollections} collection(s) created`);
+  if (report.createdRequests > 0) parts.push(`${report.createdRequests} request(s) created`);
+  if (report.overwritten > 0) parts.push(`${report.overwritten} request(s) overwritten`);
+  if (report.environmentsCreated > 0) parts.push(`${report.environmentsCreated} environment(s) created`);
+  if (report.variablesCreated > 0) parts.push(`${report.variablesCreated} variable(s) created`);
+  if (report.variablesOverwritten > 0) parts.push(`${report.variablesOverwritten} variable(s) overwritten`);
+  if (report.skipped > 0) parts.push(`${report.skipped} request(s) skipped`);
+  if (report.variablesSkipped > 0) parts.push(`${report.variablesSkipped} variable(s) skipped`);
+
+  const summary =
+    parts.length > 0
+      ? `Import finished: ${parts.join(", ")}.`
+      : "Import finished: everything in the file already matches this app — nothing changed.";
+  return summary + (report.warnings.length > 0 ? ` ${report.warnings.length} warning(s).` : "");
+}
 
 function SectionLabel({ children }: { children: string }) {
   return (
@@ -151,12 +174,7 @@ function ImportControls() {
     setStatus(null);
     try {
       const report = await ipc.applyRestmanImport(content, mode);
-      setStatus(
-        `Imported ${report.workspacesCreated} new workspace(s), ${report.createdCollections} collection(s), ` +
-          `${report.createdRequests} request(s), ${report.environmentsCreated} environment(s), ` +
-          `${report.variablesCreated} variable(s).` +
-          (report.warnings.length > 0 ? ` ${report.warnings.length} warning(s).` : ""),
-      );
+      setStatus(formatImportStatus(report));
       setContent(null);
       setPreview(null);
       // Names/trees may have changed anywhere — refetch everything, then

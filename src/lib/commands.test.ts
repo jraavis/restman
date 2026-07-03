@@ -33,6 +33,7 @@ describe("normalizeShortcut", () => {
 describe("commandForShortcut", () => {
   it("resolves a command's default shortcut with no overrides", () => {
     expect(commandForShortcut("mod+s", {})?.id).toBe("request.save");
+    expect(commandForShortcut("mod+w", {})?.id).toBe("tab.close");
   });
 
   it("an override takes precedence, and the old default no longer resolves", () => {
