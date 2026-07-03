@@ -2,7 +2,7 @@
 //! menu), environment quick-switch indicator, sidebar toggle, and appearance
 //! settings.
 
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { Cable, ChevronDown, Cookie, MoreHorizontal, Network, PanelLeft, Pencil, Plus, Puzzle, Radio, Server, Settings, Settings2, Trash2, Wrench } from "lucide-react";
 import { useRegisterCommand } from "../lib/commands";
 import { confirmDelete } from "../lib/confirmDelete";
@@ -30,6 +30,17 @@ import { useUiStore } from "../stores/uiStore";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const isMac = /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
+
+/** Frameless titlebar: drag on press, maximize/restore on double-click. */
+function handleDragRegionMouseDown(e: MouseEvent) {
+  if (e.button !== 0 || !("__TAURI_INTERNALS__" in window)) return;
+  const win = getCurrentWindow();
+  if (e.detail === 2) {
+    void win.toggleMaximize();
+  } else {
+    void win.startDragging();
+  }
+}
 
 export function TopBar() {
   const { data: workspaces } = useWorkspaces();
@@ -87,8 +98,8 @@ export function TopBar() {
       </button>
 
       <div
-        data-tauri-drag-region
-        className="flex items-center gap-1.5 pr-1"
+        className="flex cursor-default items-center gap-1.5 pr-1"
+        onMouseDown={handleDragRegionMouseDown}
       >
         <img src="/restman.png" alt="" className="h-6 w-6 rounded-md" />
         <span className="font-semibold tracking-tight text-slate-800 dark:text-slate-100">
@@ -210,9 +221,8 @@ export function TopBar() {
       </div>
 
       <div
-        data-tauri-drag-region
-        className="min-h-full min-w-0 flex-1"
-        onDoubleClick={() => void getCurrentWindow().toggleMaximize()}
+        className="min-h-full min-w-0 flex-1 cursor-default"
+        onMouseDown={handleDragRegionMouseDown}
       />
 
       <div className="flex items-center gap-2">

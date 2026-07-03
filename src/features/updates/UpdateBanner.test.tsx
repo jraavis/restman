@@ -12,7 +12,11 @@ import { UpdateBanner } from "./UpdateBanner";
 import { useUpdaterStore } from "./useUpdater";
 
 const initialState = useUpdaterStore.getState();
-const update = { version: "0.3.0", downloadAndInstall: vi.fn() } as unknown as Update;
+const update = {
+  currentVersion: "0.2.0",
+  version: "0.3.0",
+  downloadAndInstall: vi.fn(),
+} as unknown as Update;
 
 describe("UpdateBanner", () => {
   beforeEach(() => {
@@ -27,7 +31,8 @@ describe("UpdateBanner", () => {
   it("shows version and actions when an update is available", () => {
     useUpdaterStore.setState({ phase: "available", update });
     render(<UpdateBanner />);
-    expect(screen.getByText("Update available: v0.3.0")).toBeTruthy();
+    expect(screen.getByText("Update available")).toBeTruthy();
+    expect(screen.getByText("v0.2.0 → v0.3.0")).toBeTruthy();
     expect(screen.getByText("Install & Restart")).toBeTruthy();
   });
 

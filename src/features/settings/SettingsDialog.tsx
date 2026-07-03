@@ -596,17 +596,20 @@ function UpdateCheck() {
   const status =
     phase === "checking"
       ? "Checking…"
-      : phase === "available"
-        ? `Update available: v${update?.version}`
-        : phase === "downloading"
-          ? "Downloading…"
-          : phase === "installing"
-            ? "Installing…"
-            : phase === "upToDate"
-              ? "You're up to date."
-              : phase === "error"
-                ? `Update failed: ${error}`
-                : null;
+      : phase === "downloading"
+        ? "Downloading…"
+        : phase === "installing"
+          ? "Installing…"
+          : phase === "upToDate"
+            ? "You're up to date."
+            : phase === "error"
+              ? `Update failed: ${error}`
+              : null;
+
+  const versionJump =
+    update && (phase === "available" || phase === "downloading" || phase === "installing")
+      ? `Installed: v${update.currentVersion} → Available: v${update.version}`
+      : null;
 
   return (
     <div className="mt-1 border-t border-slate-100 pt-3 dark:border-slate-700">
@@ -635,7 +638,10 @@ function UpdateCheck() {
           <UpdateProgressBar progress={progress} />
         </div>
       )}
-      {status && <p className="mt-1.5 text-xs text-slate-400">{status}</p>}
+      {versionJump && (
+        <p className="mt-1.5 font-mono text-xs text-slate-600 dark:text-slate-300">{versionJump}</p>
+      )}
+      {status && <p className="mt-1 text-xs text-slate-400">{status}</p>}
     </div>
   );
 }

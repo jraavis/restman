@@ -26,7 +26,10 @@ export function UpdateBanner() {
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
-            Update available: v{update.version}
+            Update available
+          </p>
+          <p className="mt-0.5 font-mono text-xs text-slate-500 dark:text-slate-400">
+            v{update.currentVersion} → v{update.version}
           </p>
           <p className="mt-0.5 text-xs text-slate-400">
             {phase === "installing"
