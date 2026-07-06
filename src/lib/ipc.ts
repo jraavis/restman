@@ -21,6 +21,7 @@ import type {
   GrpcConnectArgs,
   GrpcEvent,
   GrpcOutbound,
+  GrpcSchemaDiscoveryResult,
   HistoryEntry,
   HistoryFilter,
   ImportFormat,
@@ -265,6 +266,11 @@ export const ipc = {
     invoke<void>("ws_send", { connectionId, message }),
 
   // Streaming (gRPC, #17d)
+  // Live server reflection discovery — the reflection-to-connect handoff.
+  // `target` is a bare "host:port" or a full "grpc(s)://…" URL; see
+  // `grpc_discover_schema`'s doc comment for the scheme-defaulting rule.
+  grpcDiscoverSchema: (workspaceId: string, target: string) =>
+    invoke<GrpcSchemaDiscoveryResult>("grpc_discover_schema", { workspaceId, target }),
   grpcConnect: (
     workspaceId: string,
     args: GrpcConnectArgs,

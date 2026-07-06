@@ -1,11 +1,14 @@
-//! MOCK gRPC schema discovery. Temporarily stands in for the real Tauri IPC
-//! wrapper that task #33 will add to `src/lib/ipc.ts` (e.g.
-//! `ipc.grpcDiscoverSchema`). DO NOT touch `ipc.ts` from this task. Returns
-//! hardcoded fake `GrpcSchema` data after a tiny delay to simulate latency,
-//! so the component and tests can ship before the reflection (#26) and
-//! proto-upload (#27) backends exist.
+//! gRPC schema discovery dispatch. `"reflection"` mode calls the real
+//! `ipc.grpcDiscoverSchema` (the reflection-to-connect handoff) and maps its
+//! result onto the local `GrpcSchema` shape, stamping the discovered
+//! `descriptorSet` onto every method so `GrpcPanel` can connect from a
+//! picked method alone. `"proto-upload"` mode is still mocked — it already
+//! has a working connect path via `GrpcPanel`'s own proto-source textarea,
+//! so wiring it to a real discovery round-trip is out of this task's scope.
 
+import { ipc } from "../../lib/ipc";
 import type {
+  GrpcMethodDescriptor,
   GrpcSchema,
   GrpcSchemaDiscoveryArgs,
 } from "./grpcSchemaTypes";
@@ -78,14 +81,46 @@ export const PROTO_FAKE_SCHEMA: GrpcSchema = {
 };
 
 /**
- * Mock discovery entry point. Task #33 will replace this with a real
- * `invoke("grpc_discover_schema", args)` and move it into `ipc.ts`. Returns
- * hardcoded fake data based on `args.mode`.
+ * Discovery entry point. `"proto-upload"` mode still returns mocked data (see
+ * module doc comment); `"reflection"` mode calls the real
+ * `ipc.grpcDiscoverSchema` and maps its result onto the local `GrpcSchema`
+ * shape, stamping the returned `descriptorSet` onto every discovered method.
  */
 export async function discoverGrpcSchema(
   args: GrpcSchemaDiscoveryArgs,
+  workspaceId: string,
 ): Promise<GrpcSchema> {
-  await new Promise((r) => setTimeout(r, 50));
-  if (args.mode === "proto-upload") return PROTO_FAKE_SCHEMA;
-  return REFLECTION_FAKE_SCHEMA;
+  if (args.mode === "proto-upload") {
+    await new Promise((r) => setTimeout(r, 50));
+    return PROTO_FAKE_SCHEMA;
+  }
+
+  const result = await ipc.grpcDiscoverSchema(workspaceId, args.target ?? "");
+  return {
+    source: "reflection",
+    services: result.services.map((service) => ({
+      name: service.name,
+      methods: service.methods.map(
+        (method): GrpcMethodDescriptor => ({
+          serviceName: method.serviceName,
+          methodName: method.methodName,
+          fullName: method.fullName,
+          streamingType: method.streamingType,
+          inputFields: method.inputFields.map((f) => ({
+            name: f.name,
+            type: f.type,
+            repeated: f.repeated,
+            messageTypeName: f.messageTypeName ?? undefined,
+          })),
+          outputFields: method.outputFields.map((f) => ({
+            name: f.name,
+            type: f.type,
+            repeated: f.repeated,
+            messageTypeName: f.messageTypeName ?? undefined,
+          })),
+          descriptorSet: result.descriptorSet,
+        }),
+      ),
+    })),
+  };
 }

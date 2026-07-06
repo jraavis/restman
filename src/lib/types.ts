@@ -726,25 +726,31 @@ export type GrpcEvent =
   | { type: "closed" };
 
 /**
- * Arguments for `grpcConnect`. `protoFiles` is a `path -> source text` map
- * (mirrors `engine::grpc::schema::ProtoFileSet`) compiled into a
- * `DescriptorPool` server-side — schema discovery via live server reflection
- * (#33) hasn't landed yet, so this is how a pool is sourced today; passing
- * the schema's already-discovered proto source (e.g. from `GrpcSchemaPicker`'s
- * proto-upload mode) here is the bridge until #33 adds a discovery-to-connect
- * handoff that doesn't require re-sending source text. `methodFullName` is
- * the same slash-separated `"package.Service/Method"` form used throughout
- * this feature (see `GrpcMethodDescriptor.fullName` in `grpcSchemaTypes.ts`).
- * There is no streaming-mode field — the backend derives unary vs.
- * client/server-streaming vs. bidi from the compiled schema itself, so it
- * can never disagree with what `protoFiles`/`entryPoint` actually describe.
+ * Arguments for `grpcConnect`. Two ways to source the server-side
+ * `DescriptorPool`, exactly one of which should be set:
+ *
+ * - `protoFiles` (a `path -> source text` map mirroring
+ *   `engine::grpc::schema::ProtoFileSet`) + `entryPoint`, compiled fresh
+ *   server-side — used for `GrpcSchemaPicker`'s proto-upload mode.
+ * - `descriptorSet`: the base64 `FileDescriptorSet` bytes returned by
+ *   `grpcDiscoverSchema`'s reflection mode — the reflection-to-connect
+ *   handoff, letting a reflection-discovered method connect without
+ *   re-sending proto source (which reflection never produced in the first
+ *   place).
+ *
+ * `methodFullName` is the same slash-separated `"package.Service/Method"`
+ * form used throughout this feature (see `GrpcMethodDescriptor.fullName` in
+ * `grpcSchemaTypes.ts`). There is no streaming-mode field — the backend
+ * derives unary vs. client/server-streaming vs. bidi from the compiled
+ * schema itself, so it can never disagree with what the schema describes.
  */
 export interface GrpcConnectArgs {
   url: string;
   methodFullName: string;
   request: unknown;
-  protoFiles: Record<string, string>;
-  entryPoint: string;
+  protoFiles?: Record<string, string>;
+  entryPoint?: string;
+  descriptorSet?: string;
 }
 
 /**
@@ -754,6 +760,41 @@ export interface GrpcConnectArgs {
  */
 export interface GrpcOutbound {
   request: unknown;
+}
+
+/**
+ * Return value of `grpcDiscoverSchema` — mirrors `model::grpc::
+ * {GrpcFieldDescriptorDto, GrpcMethodDescriptorDto, GrpcServiceDescriptorDto,
+ * GrpcSchemaDiscoveryResult}` field-for-field. Shaped to match
+ * `grpcSchemaTypes.ts`'s `GrpcFieldDescriptor`/`GrpcMethodDescriptor` so the
+ * reflection dispatch in `grpcSchemaIpc.ts` is a near-direct pass-through,
+ * not a reshaping.
+ */
+export interface GrpcDiscoveredField {
+  name: string;
+  type: string;
+  repeated: boolean;
+  messageTypeName: string | null;
+}
+
+export interface GrpcDiscoveredMethod {
+  serviceName: string;
+  methodName: string;
+  fullName: string;
+  streamingType: "unary" | "server-streaming" | "client-streaming" | "bidi";
+  inputFields: GrpcDiscoveredField[];
+  outputFields: GrpcDiscoveredField[];
+}
+
+export interface GrpcDiscoveredService {
+  name: string;
+  methods: GrpcDiscoveredMethod[];
+}
+
+export interface GrpcSchemaDiscoveryResult {
+  services: GrpcDiscoveredService[];
+  /** Base64 `FileDescriptorSet` bytes — pass straight through to `grpcConnect`'s `descriptorSet`. */
+  descriptorSet: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,8 @@ import type {
 import { discoverGrpcSchema } from "./grpcSchemaIpc";
 
 interface GrpcSchemaPickerProps {
+  /** Needed for reflection mode's real discovery call (resolves workspace proxy/mTLS transport settings). */
+  workspaceId: string;
   onMethodSelected: (method: GrpcMethodDescriptor) => void;
   selectedMethodFullName?: string;
   onClose?: () => void;
@@ -34,6 +36,7 @@ const STREAMING_CLASSES: Record<GrpcMethodDescriptor["streamingType"], string> =
 };
 
 export function GrpcSchemaPicker({
+  workspaceId,
   onMethodSelected,
   selectedMethodFullName,
   onClose,
@@ -55,12 +58,15 @@ export function GrpcSchemaPicker({
     setLoading(true);
     setError(null);
     try {
-      const result = await discoverGrpcSchema({
-        mode,
-        target: mode === "reflection" ? target : undefined,
-        protoContent: mode === "proto-upload" ? protoContent : undefined,
-        protoFileName: mode === "proto-upload" ? protoFileName : undefined,
-      });
+      const result = await discoverGrpcSchema(
+        {
+          mode,
+          target: mode === "reflection" ? target : undefined,
+          protoContent: mode === "proto-upload" ? protoContent : undefined,
+          protoFileName: mode === "proto-upload" ? protoFileName : undefined,
+        },
+        workspaceId,
+      );
       setSchema(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

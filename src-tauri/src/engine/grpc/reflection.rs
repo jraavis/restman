@@ -680,7 +680,12 @@ pub(crate) enum ReflectionAttemptOutcome {
     /// `grpc::StatusCode`.
     ErrorResponse { code: i32 },
     /// A response was parsed successfully and was not an error — reflection
-    /// is working on this version, no fallback needed.
+    /// is working on this version, no fallback needed. Never actually
+    /// constructed in production: `try_list_services` returns `Ok(..)`
+    /// directly on success rather than wrapping it in this enum, so this
+    /// variant exists purely so `should_retry_on_v1alpha`'s tests can
+    /// exercise the negative case explicitly.
+    #[allow(dead_code)]
     Success,
 }
 
@@ -730,6 +735,13 @@ pub(crate) fn should_retry_on_v1alpha(outcome: ReflectionAttemptOutcome) -> bool
 /// response as carrying "transitive dependencies"), but enforcing or
 /// reordering that is out of scope here; this function decodes and assembles
 /// exactly what it's given.
+///
+/// Not called by `discover_schema` (which assembles its own
+/// `FileDescriptorSet` directly since it also needs the encoded bytes, not
+/// just the pool) — kept as the single-raw-bytes-list building block for any
+/// caller that only has that shape, and exercised directly by this module's
+/// own tests.
+#[allow(dead_code)]
 pub(crate) fn descriptor_pool_from_file_descriptors(
     file_descriptor_protos: &[Vec<u8>],
 ) -> AppResult<DescriptorPool> {
@@ -1021,9 +1033,29 @@ pub(crate) async fn discover_schema(
         .collect();
 
     let mut file_descriptor_bytes: Vec<Vec<u8>> = Vec::new();
-    for name in &queryable {
+    let last = queryable.len().saturating_sub(1);
+    // No non-meta services to ask about — the `list_services` response has
+    // already been fully read by this point, so an explicit `half_close()`
+    // here hits the same h2 "inactive stream" error the loop below sidesteps
+    // by folding `end_of_stream` into its last frame instead of half-closing
+    // separately afterward (see that comment). With nothing left to send,
+    // simply falling through and letting `stream` drop at the end of this
+    // function closes the request side just as validly — real servers treat
+    // an implicit RST from a dropped stream as a normal client-side finish.
+    for (i, name) in queryable.iter().enumerate() {
         let request = build_file_containing_symbol_request(version, host, name)?;
-        stream.send_frame(&request.encode_to_vec(), false)?;
+        // Mark the *last* request end_of_stream directly (matching
+        // `call_unary`'s single-message pattern) rather than sending every
+        // message with `false` and half-closing separately afterward: by
+        // the time all needed responses have been read, the peer's response
+        // side is already fully finished (trailers sent), and calling
+        // `half_close()` on the request side *after* that point hits h2
+        // "inactive stream" — h2 has already torn down this stream's local
+        // send state once both the full response was observed and the
+        // connection driver had nothing further queued to write. Ending the
+        // request side in the same frame as its last message sidesteps that
+        // ordering entirely.
+        stream.send_frame(&request.encode_to_vec(), i == last)?;
         let bytes = stream.recv_frame().await?.ok_or_else(|| {
             AppError::Other(format!(
                 "gRPC reflection server closed the stream before answering file_containing_symbol(\"{name}\")"
@@ -1044,7 +1076,6 @@ pub(crate) async fn discover_schema(
             }
         }
     }
-    stream.half_close()?;
 
     // Dedup by filename before assembling the `FileDescriptorSet` — several
     // services can share transitive dependencies, and each response is
@@ -1671,9 +1702,12 @@ mod tests {
                     .send_data(Bytes::from(crate::engine::grpc::framing::frame(&resp2.encode_to_vec())), false)
                     .expect("send file_containing_symbol response");
 
-                // Drain the client's half-close, then close out with a
-                // normal OK status.
-                while body.data().await.is_some() {}
+                // Must properly finish the response (trailers, real
+                // end-of-stream) before this task returns — letting
+                // `send_stream` simply drop mid-flight makes h2 treat the
+                // response as abandoned and send an implicit RST_STREAM,
+                // which can race with (and clobber) the data frame just
+                // sent above from the client's point of view.
                 let mut trailers = HeaderMap::new();
                 trailers.insert("grpc-status", "0".parse().unwrap());
                 send_stream.send_trailers(trailers).expect("send_trailers");
@@ -1826,8 +1860,9 @@ mod tests {
                 send_stream
                     .send_data(Bytes::from(crate::engine::grpc::framing::frame(&resp2.encode_to_vec())), false)
                     .expect("send file_containing_symbol response");
-
-                while body.data().await.is_some() {}
+                // See the primary happy-path test's comment: dropping
+                // `send_stream` without properly finishing it makes h2 send
+                // an implicit RST that can race with the data just sent.
                 let mut trailers = HeaderMap::new();
                 trailers.insert("grpc-status", "0".parse().unwrap());
                 send_stream.send_trailers(trailers).expect("send_trailers");
@@ -1843,6 +1878,80 @@ mod tests {
             assert_eq!(discovered.services.len(), 1);
             assert_eq!(discovered.services[0].name, "reflectiontest.Calc");
             assert_eq!(discovered.services[0].methods[0].full_name, "reflectiontest.Calc/Double");
+
+            server.await.expect("server task did not finish cleanly");
+        }
+
+        /// Proves the `queryable.is_empty()` branch — a server that only
+        /// registers the meta-service itself (nothing left to query after
+        /// filtering it out) — doesn't hang or error. This exercises the
+        /// same "client tries to act on the request stream after the
+        /// response was already fully read" shape that the main loop's
+        /// `half_close`-vs-`end_of_stream` bug lived in (see that loop's
+        /// comment) — an earlier version of this branch called an explicit
+        /// `stream.half_close()` here, which hit the identical h2 "inactive
+        /// stream" error once this test was written to catch it (the server
+        /// observed the resulting RST as "stream no longer needed" while
+        /// waiting on a graceful close that never came). Fixed by dropping
+        /// the call entirely: with nothing left to send, letting `stream`
+        /// drop at the end of `discover_schema` is a valid, real-server-safe
+        /// way to end the request side.
+        #[tokio::test(flavor = "current_thread")]
+        async fn discovers_zero_queryable_services_without_hanging_or_erroring() {
+            let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let addr = listener.local_addr().expect("local_addr");
+
+            let server = tokio::spawn(async move {
+                let (sock, _) = listener.accept().await.expect("accept");
+                let mut conn = h2::server::handshake(sock).await.expect("h2 handshake");
+                let (request, mut respond) = conn
+                    .accept()
+                    .await
+                    .expect("server should see an incoming stream")
+                    .expect("server accept should not error");
+                tokio::spawn(async move { while conn.accept().await.is_some() {} });
+
+                let response = http::Response::builder().status(200).body(()).expect("response head");
+                let mut send_stream = respond.send_response(response, false).expect("send_response");
+
+                let pool = v1_pool();
+                let req_desc = pool
+                    .get_message_by_name("grpc.reflection.v1.ServerReflectionRequest")
+                    .expect("ServerReflectionRequest");
+                let mut body = request.into_body();
+                let mut unframer = crate::engine::grpc::framing::FrameUnframer::default();
+                let mut queue = VecDeque::new();
+
+                let payload = read_one_request(&mut body, &mut unframer, &mut queue).await;
+                let msg = DynamicMessage::decode(req_desc, payload.as_slice())
+                    .expect("decode list_services request");
+                assert!(msg.has_field_by_name("list_services"));
+                // Only the meta-service itself is registered — `discover_schema`
+                // filters this name out, leaving zero queryable services.
+                let resp = build_list_services_response(&pool, &["grpc.reflection.v1.ServerReflection"]);
+                send_stream
+                    .send_data(Bytes::from(crate::engine::grpc::framing::frame(&resp.encode_to_vec())), false)
+                    .expect("send list_services response");
+
+                // See the primary happy-path test's comment: dropping
+                // `send_stream` without properly finishing it makes h2 send
+                // an implicit RST that can race with the data just sent.
+                // The client sends nothing further for the zero-queryable
+                // case (see this test's own doc comment above), so there's
+                // nothing to wait for here.
+                let mut trailers = HeaderMap::new();
+                trailers.insert("grpc-status", "0".parse().unwrap());
+                send_stream.send_trailers(trailers).expect("send_trailers");
+            });
+
+            let mut transport = GrpcTransport::connect(&format!("grpc://{addr}"), None)
+                .await
+                .expect("plaintext loopback connect");
+            let discovered = discover_schema(&mut transport, "")
+                .await
+                .expect("discover_schema should succeed with zero queryable services");
+
+            assert!(discovered.services.is_empty());
 
             server.await.expect("server task did not finish cleanly");
         }

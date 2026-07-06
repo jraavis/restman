@@ -90,20 +90,23 @@ pub enum GrpcEvent {
 /// real `grpcConnect` IPC wrapper parses that string into an object before
 /// invoking, same as `serde_json::Value` expects here).
 ///
-/// `proto_files`/`entry_point` are how this command sources a
-/// `DescriptorPool` *today*: schema discovery (reflection or proto-upload,
-/// #33) hasn't landed yet — `grpcSchemaIpc.ts` is still fully mocked, and
-/// `AppState` has no descriptor-pool cache a connect could reference by id —
-/// so `grpc_connect` compiles a pool itself, the same way
+/// `proto_files`/`entry_point` are one of two ways this command sources a
+/// `DescriptorPool` — compiling inline `.proto` source itself, the same way
 /// `engine::grpc::schema::compile_proto_set`'s own tests do: a small
 /// in-memory file set (`path -> source text`) plus which file is the entry
-/// point. This is a real, if temporary, scope boundary: connecting against a
-/// schema discovered via live server reflection isn't possible until #33
-/// adds that discovery command and a way to hand its resulting pool (or the
-/// raw `FileDescriptorProto`s behind it) to `grpc_connect` instead of/in
-/// addition to inline proto source. `proto_files` uses the same shape as
-/// `engine::grpc::schema::ProtoFileSet` (a `BTreeMap`, but plain
-/// `HashMap`-shaped JSON crosses IPC the same way either type serializes).
+/// point. `proto_files` uses the same shape as `engine::grpc::schema::
+/// ProtoFileSet` (a `BTreeMap`, but plain `HashMap`-shaped JSON crosses IPC
+/// the same way either type serializes).
+///
+/// `descriptor_set` is the other way: a base64-encoded `FileDescriptorSet`,
+/// as returned by `grpc_discover_schema`'s reflection mode — the
+/// reflection-to-connect handoff. Exactly one of `descriptor_set` or
+/// `proto_files`/`entry_point` must be set; `grpc_connect` rejects both-set
+/// and neither-set as a clean argument error rather than guessing which one
+/// the caller meant. Kept as an alternative *field*, not a replacement, so
+/// `grpc_connect` stays stateless — no in-memory pool cache handed across
+/// the IPC boundary by reference, which would be fragile (the pool could
+/// outlive the discovery session, or vice versa).
 ///
 /// The streaming mode (unary vs. client/server-streaming vs. bidi) is
 /// deliberately *not* a field here: once the method descriptor is resolved
@@ -116,8 +119,12 @@ pub struct GrpcConnectArgs {
     pub url: String,
     pub method_full_name: String,
     pub request: serde_json::Value,
+    #[serde(default)]
     pub proto_files: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
     pub entry_point: String,
+    #[serde(default)]
+    pub descriptor_set: Option<String>,
 }
 
 /// An outbound request message sent on an already-open client-streaming/bidi
@@ -130,6 +137,119 @@ pub struct GrpcConnectArgs {
 #[serde(rename_all = "camelCase")]
 pub struct GrpcOutbound {
     pub request: serde_json::Value,
+}
+
+// --- Schema discovery (grpc_discover_schema, reflection-to-connect handoff) ---
+//
+// Mirrors `src/features/streaming/grpcSchemaTypes.ts`'s `GrpcFieldDescriptor`/
+// `GrpcMethodDescriptor` shape field-for-field (the frontend's
+// `GrpcMessageBuilder`/`GrpcSchemaPicker` components already render against
+// that shape), converted from `engine::grpc::reflection`'s pure-Rust
+// `Discovered*` types at the command layer — the engine stays free of serde
+// IPC concerns, same convention as the rest of this module.
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcFieldDescriptorDto {
+    pub name: String,
+    pub r#type: String,
+    pub repeated: bool,
+    pub message_type_name: Option<String>,
+}
+
+impl From<crate::engine::grpc::reflection::DiscoveredField> for GrpcFieldDescriptorDto {
+    fn from(f: crate::engine::grpc::reflection::DiscoveredField) -> Self {
+        Self {
+            name: f.name,
+            r#type: f.type_name,
+            repeated: f.repeated,
+            message_type_name: f.message_type_name,
+        }
+    }
+}
+
+/// Matches `GrpcMethodDescriptor.streamingType`'s TS union exactly.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum GrpcStreamingTypeDto {
+    Unary,
+    ServerStreaming,
+    ClientStreaming,
+    Bidi,
+}
+
+impl From<crate::engine::grpc::reflection::GrpcStreamingKind> for GrpcStreamingTypeDto {
+    fn from(kind: crate::engine::grpc::reflection::GrpcStreamingKind) -> Self {
+        use crate::engine::grpc::reflection::GrpcStreamingKind;
+        match kind {
+            GrpcStreamingKind::Unary => GrpcStreamingTypeDto::Unary,
+            GrpcStreamingKind::ServerStreaming => GrpcStreamingTypeDto::ServerStreaming,
+            GrpcStreamingKind::ClientStreaming => GrpcStreamingTypeDto::ClientStreaming,
+            GrpcStreamingKind::Bidi => GrpcStreamingTypeDto::Bidi,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcMethodDescriptorDto {
+    pub service_name: String,
+    pub method_name: String,
+    pub full_name: String,
+    pub streaming_type: GrpcStreamingTypeDto,
+    pub input_fields: Vec<GrpcFieldDescriptorDto>,
+    pub output_fields: Vec<GrpcFieldDescriptorDto>,
+}
+
+impl From<crate::engine::grpc::reflection::DiscoveredMethod> for GrpcMethodDescriptorDto {
+    fn from(m: crate::engine::grpc::reflection::DiscoveredMethod) -> Self {
+        Self {
+            service_name: m.service_name,
+            method_name: m.method_name,
+            full_name: m.full_name,
+            streaming_type: m.streaming.into(),
+            input_fields: m.input_fields.into_iter().map(Into::into).collect(),
+            output_fields: m.output_fields.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcServiceDescriptorDto {
+    pub name: String,
+    pub methods: Vec<GrpcMethodDescriptorDto>,
+}
+
+impl From<crate::engine::grpc::reflection::DiscoveredService> for GrpcServiceDescriptorDto {
+    fn from(s: crate::engine::grpc::reflection::DiscoveredService) -> Self {
+        Self {
+            name: s.name,
+            methods: s.methods.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// `grpc_discover_schema`'s return value. `descriptor_set` is the base64-
+/// encoded `FileDescriptorSet` bytes `engine::grpc::reflection::
+/// discover_schema` assembled — round-trips back into `GrpcConnectArgs.
+/// descriptor_set` unchanged, so the frontend never needs to inspect or
+/// re-encode it, just carry it from discovery to connect.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GrpcSchemaDiscoveryResult {
+    pub services: Vec<GrpcServiceDescriptorDto>,
+    pub descriptor_set: String,
+}
+
+impl From<crate::engine::grpc::reflection::DiscoveredSchema> for GrpcSchemaDiscoveryResult {
+    fn from(schema: crate::engine::grpc::reflection::DiscoveredSchema) -> Self {
+        use base64::Engine as _;
+        Self {
+            services: schema.services.into_iter().map(Into::into).collect(),
+            descriptor_set: base64::engine::general_purpose::STANDARD.encode(schema.file_descriptor_set),
+        }
+    }
 }
 
 /// Splits a `"package.Service/Method"` full name into its service and method

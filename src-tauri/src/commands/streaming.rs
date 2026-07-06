@@ -12,16 +12,24 @@
 //!
 //! `grpc_connect` follows the same connect-then-spawn-then-register shape as
 //! `sse_connect`/`ws_connect`, with one structural difference: building the
-//! `DescriptorPool` (from inline `.proto` source — see `GrpcConnectArgs`'
-//! doc comment for why schema discovery isn't wired in yet) happens
-//! synchronously in the command, so a bad `.proto` or an unknown method
-//! returns a command error immediately, the same way `build_ws_client`'s
-//! transport errors do — never silently inside the spawned task where the
-//! caller has nothing left to catch it. The network connect and the actual
-//! RPC drive *do* happen inside the spawned task, same as `run_ws`, so a
-//! connect failure becomes a `GrpcEvent::Error` on the channel rather than a
+//! `DescriptorPool` (from inline `.proto` source, or from a
+//! `descriptor_set` handed over by `grpc_discover_schema`'s reflection mode
+//! — see `GrpcConnectArgs`' doc comment) happens synchronously in the
+//! command, so a bad `.proto`/descriptor set or an unknown method returns a
+//! command error immediately, the same way `build_ws_client`'s transport
+//! errors do — never silently inside the spawned task where the caller has
+//! nothing left to catch it. The network connect and the actual RPC drive
+//! *do* happen inside the spawned task, same as `run_ws`, so a connect
+//! failure becomes a `GrpcEvent::Error` on the channel rather than a
 //! command error (there's no command-result caller left listening by the
 //! time a long-lived connection actually drops).
+//!
+//! `grpc_discover_schema` is the reflection-to-connect handoff's other half:
+//! connects, live-drives `engine::grpc::reflection::discover_schema`, and
+//! hands back the discovered services/methods plus the raw descriptor set
+//! bytes `grpc_connect` above can consume directly — no pool cached
+//! in-process and referenced by id, so a discovery session and the eventual
+//! connect it feeds don't need to share process lifetime.
 //!
 //! gRPC connections honor the workspace's proxy and client-certificate
 //! settings too, despite the hand-rolled h2/rustls client having no reqwest
@@ -36,10 +44,11 @@ use crate::engine::grpc::{self, transport::GrpcTransport};
 use crate::engine::http::{build_client, build_ws_client};
 use crate::engine::{sse, ws};
 use crate::error::{AppError, AppResult};
-use crate::model::grpc::{GrpcConnectArgs, GrpcEvent, GrpcOutbound};
+use crate::model::grpc::{GrpcConnectArgs, GrpcEvent, GrpcOutbound, GrpcSchemaDiscoveryResult};
 use crate::model::http::{HeaderEntry, RequestOptions};
 use crate::model::streaming::{message_to_event, outbound_to_message, SseEvent, WsEvent, WsOutbound};
 use crate::store::{AppState, StreamHandle, StreamSender};
+use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use tauri::ipc::Channel;
 use tauri::State;
@@ -149,6 +158,39 @@ pub fn ws_send(
     }
 }
 
+/// Connects to `target` and live-drives reflection discovery
+/// (`engine::grpc::reflection::discover_schema`), returning the discovered
+/// services/methods plus a descriptor set `grpc_connect` can consume
+/// directly via `GrpcConnectArgs.descriptor_set` — the reflection-to-connect
+/// handoff. Honors the same workspace proxy/mTLS settings `grpc_connect`
+/// does, via the identical `GrpcTransport::connect` path.
+///
+/// `target` matches `GrpcSchemaPicker.tsx`'s bare `host:port` input
+/// convention (e.g. `"localhost:50051"`, no scheme) — distinct from
+/// `grpc_connect`'s own `url` field, which always requires an explicit
+/// `grpc://`/`grpcs://` scheme. A target that already carries one of those
+/// schemes is used as-is; otherwise it defaults to plaintext (`grpc://`),
+/// matching a typical local dev server without TLS.
+#[tauri::command]
+pub async fn grpc_discover_schema(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    target: String,
+) -> AppResult<GrpcSchemaDiscoveryResult> {
+    let transport_overrides = {
+        let conn = state.db.lock().unwrap();
+        crate::workspace::resolve_transport(&conn, &workspace_id)?
+    };
+    let url = if target.starts_with("grpc://") || target.starts_with("grpcs://") {
+        target
+    } else {
+        format!("grpc://{target}")
+    };
+    let mut transport = GrpcTransport::connect(&url, transport_overrides.as_ref()).await?;
+    let discovered = grpc::reflection::discover_schema(&mut transport, "").await?;
+    Ok(discovered.into())
+}
+
 /// Opens a gRPC connection and drives the first request: compiles the
 /// `DescriptorPool` and resolves the method *synchronously*, here in the
 /// command (a bad `.proto` or unknown method is a command error the caller
@@ -178,11 +220,32 @@ pub async fn grpc_connect(
         crate::workspace::resolve_transport(&conn, &workspace_id)?
     };
 
-    let pool = grpc::schema::compile_proto_set_cached(
-        &state.grpc_schema_cache,
-        &args.proto_files,
-        std::slice::from_ref(&args.entry_point),
-    )?;
+    let pool = match &args.descriptor_set {
+        Some(encoded) => {
+            if !args.proto_files.is_empty() || !args.entry_point.is_empty() {
+                return Err(AppError::Other(
+                    "grpc_connect: pass either descriptorSet or protoFiles/entryPoint, not both"
+                        .into(),
+                ));
+            }
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|e| AppError::Other(format!("invalid descriptorSet base64: {e}")))?;
+            grpc::reflection::descriptor_pool_from_file_descriptor_set_bytes(&bytes)?
+        }
+        None => {
+            if args.entry_point.is_empty() {
+                return Err(AppError::Other(
+                    "grpc_connect: pass either descriptorSet or protoFiles/entryPoint".into(),
+                ));
+            }
+            grpc::schema::compile_proto_set_cached(
+                &state.grpc_schema_cache,
+                &args.proto_files,
+                std::slice::from_ref(&args.entry_point),
+            )?
+        }
+    };
     let method = grpc::resolve_method(&pool, &args.method_full_name)?;
     let is_unary = !method.is_client_streaming() && !method.is_server_streaming();
 

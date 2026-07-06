@@ -125,6 +125,7 @@ pub fn run() {
             commands::sse_connect,
             commands::ws_connect,
             commands::ws_send,
+            commands::grpc_discover_schema,
             commands::grpc_connect,
             commands::grpc_send,
             commands::grpc_finish_sending,

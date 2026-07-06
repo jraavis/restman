@@ -61,7 +61,7 @@ function switchToProto() {
 
 describe("GrpcSchemaPicker", () => {
   it("renders the Reflection mode by default and disables Discover until target is set", () => {
-    render(<GrpcSchemaPicker onMethodSelected={() => {}} />);
+    render(<GrpcSchemaPicker workspaceId="ws1" onMethodSelected={() => {}} />);
     expect(screen.getByPlaceholderText("localhost:50051")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Discover" })).toBeDisabled();
 
@@ -73,7 +73,7 @@ describe("GrpcSchemaPicker", () => {
 
   it("runs discovery and renders the discovered service + methods", async () => {
     vi.mocked(discoverGrpcSchema).mockResolvedValue(REFLECTION_FAKE_SCHEMA);
-    render(<GrpcSchemaPicker onMethodSelected={() => {}} />);
+    render(<GrpcSchemaPicker workspaceId="ws1" onMethodSelected={() => {}} />);
 
     fireEvent.change(screen.getByPlaceholderText("localhost:50051"), {
       target: { value: "localhost:50051" },
@@ -81,12 +81,15 @@ describe("GrpcSchemaPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discover" }));
 
     await waitFor(() =>
-      expect(discoverGrpcSchema).toHaveBeenCalledWith({
-        mode: "reflection",
-        target: "localhost:50051",
-        protoContent: undefined,
-        protoFileName: undefined,
-      }),
+      expect(discoverGrpcSchema).toHaveBeenCalledWith(
+        {
+          mode: "reflection",
+          target: "localhost:50051",
+          protoContent: undefined,
+          protoFileName: undefined,
+        },
+        "ws1",
+      ),
     );
     expect(await screen.findByText("grpc.reflection.v1.ServerReflection")).toBeInTheDocument();
     expect(
@@ -97,7 +100,7 @@ describe("GrpcSchemaPicker", () => {
   it("calls onMethodSelected with the clicked method descriptor", async () => {
     vi.mocked(discoverGrpcSchema).mockResolvedValue(REFLECTION_FAKE_SCHEMA);
     const onMethodSelected = vi.fn();
-    render(<GrpcSchemaPicker onMethodSelected={onMethodSelected} />);
+    render(<GrpcSchemaPicker workspaceId="ws1" onMethodSelected={onMethodSelected} />);
 
     fireEvent.change(screen.getByPlaceholderText("localhost:50051"), {
       target: { value: "localhost:50051" },
@@ -117,7 +120,7 @@ describe("GrpcSchemaPicker", () => {
 
   it("proto-upload mode compiles the pasted content and renders its services", async () => {
     vi.mocked(discoverGrpcSchema).mockResolvedValue(PROTO_FAKE_SCHEMA);
-    render(<GrpcSchemaPicker onMethodSelected={() => {}} />);
+    render(<GrpcSchemaPicker workspaceId="ws1" onMethodSelected={() => {}} />);
 
     switchToProto();
 
@@ -134,6 +137,7 @@ describe("GrpcSchemaPicker", () => {
           mode: "proto-upload",
           protoContent: 'syntax = "proto3"; service Greeter {}',
         }),
+        "ws1",
       ),
     );
     expect(await screen.findByText("example.Greeter")).toBeInTheDocument();
@@ -148,7 +152,7 @@ describe("GrpcSchemaPicker", () => {
           resolveDiscovery = resolve;
         }),
     );
-    render(<GrpcSchemaPicker onMethodSelected={() => {}} />);
+    render(<GrpcSchemaPicker workspaceId="ws1" onMethodSelected={() => {}} />);
 
     fireEvent.change(screen.getByPlaceholderText("localhost:50051"), {
       target: { value: "localhost:50051" },
@@ -165,7 +169,7 @@ describe("GrpcSchemaPicker", () => {
 
   it("renders an inline error when discovery throws", async () => {
     vi.mocked(discoverGrpcSchema).mockRejectedValue(new Error("reflection offline"));
-    render(<GrpcSchemaPicker onMethodSelected={() => {}} />);
+    render(<GrpcSchemaPicker workspaceId="ws1" onMethodSelected={() => {}} />);
 
     fireEvent.change(screen.getByPlaceholderText("localhost:50051"), {
       target: { value: "localhost:50051" },
@@ -176,7 +180,7 @@ describe("GrpcSchemaPicker", () => {
   });
 
   it("renders a file input in proto-upload mode", () => {
-    render(<GrpcSchemaPicker onMethodSelected={() => {}} />);
+    render(<GrpcSchemaPicker workspaceId="ws1" onMethodSelected={() => {}} />);
     switchToProto();
     const fileInput = document.querySelector('input[type="file"]');
     expect(fileInput).not.toBeNull();
@@ -200,7 +204,7 @@ describe("GrpcSchemaPicker", () => {
     };
 
     try {
-      render(<GrpcSchemaPicker onMethodSelected={() => {}} />);
+      render(<GrpcSchemaPicker workspaceId="ws1" onMethodSelected={() => {}} />);
       switchToProto();
 
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;

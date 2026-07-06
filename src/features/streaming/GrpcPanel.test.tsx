@@ -69,6 +69,26 @@ const BIDI_SCHEMA: GrpcSchema = {
   ],
 };
 
+const REFLECTION_SCHEMA: GrpcSchema = {
+  source: "reflection",
+  services: [
+    {
+      name: "example.Greeter",
+      methods: [
+        {
+          serviceName: "example.Greeter",
+          methodName: "SayHello",
+          fullName: "example.Greeter/SayHello",
+          streamingType: "unary",
+          inputFields: [{ name: "name", type: "string", repeated: false }],
+          outputFields: [{ name: "message", type: "string", repeated: false }],
+          descriptorSet: "ZmFrZS1kZXNjcmlwdG9yLXNldA==",
+        },
+      ],
+    },
+  ],
+};
+
 beforeEach(() => {
   vi.mocked(ipc.grpcConnect).mockReset();
   vi.mocked(ipc.grpcSend).mockReset();
@@ -142,6 +162,18 @@ async function selectMethodViaProtoUpload(schema: GrpcSchema) {
   fireEvent.click(row);
 }
 
+/** Drives the embedded GrpcSchemaPicker's (default) reflection mode to select `schema`'s first method. */
+async function selectMethodViaReflection(schema: GrpcSchema) {
+  vi.mocked(discoverGrpcSchema).mockResolvedValue(schema);
+  fireEvent.change(screen.getByPlaceholderText("localhost:50051"), {
+    target: { value: "localhost:50051" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Discover" }));
+  const method = schema.services[0].methods[0];
+  const row = await screen.findByText(method.fullName);
+  fireEvent.click(row);
+}
+
 describe("GrpcPanel", () => {
   it("renders closed (idle) by default with no transcript", () => {
     renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
@@ -199,6 +231,43 @@ describe("GrpcPanel", () => {
           request: { name: "Ada" },
           protoFiles: { "main.proto": 'syntax = "proto3";' },
           entryPoint: "main.proto",
+        },
+        expect.any(Function),
+      ),
+    );
+  });
+
+  it("enables Connect for a reflection-discovered method without any proto source", async () => {
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+
+    await selectMethodViaReflection(REFLECTION_SCHEMA);
+    typeUrl("grpc://localhost:50051");
+
+    // No proto-source textarea should even render for a reflection-
+    // discovered method (see module doc comment) — it isn't just optional.
+    expect(
+      screen.queryByPlaceholderText(/Paste the \.proto source to connect with/),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled();
+  });
+
+  it("calls grpcConnect with descriptorSet (not protoFiles) for a reflection-discovered method", async () => {
+    vi.mocked(ipc.grpcConnect).mockResolvedValue("conn-1");
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+
+    await selectMethodViaReflection(REFLECTION_SCHEMA);
+    typeUrl("grpc://localhost:50051");
+    fireEvent.change(screen.getByTestId("grpc-field-name"), { target: { value: "Ada" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() =>
+      expect(ipc.grpcConnect).toHaveBeenCalledWith(
+        "ws1",
+        {
+          url: "grpc://localhost:50051",
+          methodFullName: "example.Greeter/SayHello",
+          request: { name: "Ada" },
+          descriptorSet: "ZmFrZS1kZXNjcmlwdG9yLXNldA==",
         },
         expect.any(Function),
       ),
@@ -344,9 +413,10 @@ describe("GrpcPanel", () => {
     ).toHaveValue('syntax = "proto3"; service Greeter {}');
     expect(screen.getByPlaceholderText(/Entry point filename/)).toHaveValue("greeter.proto");
 
-    // No reflection-to-connect handoff yet (see module doc comment) — the
-    // method itself isn't restored, so the message builder (and any
-    // Connect button) doesn't render until the user re-picks it.
+    // `GrpcStreamConfig` never persists the picked method (or a reflection
+    // descriptor set) — re-opening always requires re-discovery, regardless
+    // of which mode originally discovered it — so the message builder (and
+    // any Connect button) doesn't render until the user re-picks it.
     expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
   });
 

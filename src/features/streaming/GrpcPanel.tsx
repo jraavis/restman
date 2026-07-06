@@ -1,33 +1,21 @@
-//! Ephemeral gRPC client — the panel that finally wires `GrpcSchemaPicker`
-//! (17d-9, schema discovery) and `GrpcMessageBuilder` (17d-10, request
-//! building) into the real `ipc.grpcConnect`/`grpcSend`/`grpcFinishSending`
-//! commands (17d-8). Same standalone connect/watch/disconnect surface and
+//! Ephemeral gRPC client — the panel that wires `GrpcSchemaPicker` (17d-9,
+//! schema discovery) and `GrpcMessageBuilder` (17d-10, request building)
+//! into the real `ipc.grpcConnect`/`grpcSend`/`grpcFinishSending` commands
+//! (17d-8). Same standalone connect/watch/disconnect surface and
 //! modal-shell convention as `SsePanel`/`WsPanel`.
 //!
-//! ## Bridging the picker's mocked shape onto the real `GrpcConnectArgs`
+//! ## Reflection-to-connect handoff
 //!
-//! `GrpcSchemaPicker.onMethodSelected` only ever hands back a
-//! `GrpcMethodDescriptor` (service/method names, streaming type, field
-//! descriptors) — it does NOT surface the proto source text or filename it
-//! compiled that descriptor from; those are local state trapped inside the
-//! picker (`protoContent`/`protoFileName`), and #17d-11's scope is "consume
-//! `GrpcSchemaPicker`/`GrpcMessageBuilder` as child components, don't rewrite
-//! them." `grpc_connect` (`src-tauri/src/commands/streaming.rs`) has no
-//! descriptor-pool cache to reference by id — it compiles a fresh
-//! `DescriptorPool` from `protoFiles`/`entryPoint` on every connect — so the
-//! ONLY way this panel can connect at all is to also hold its own proto
-//! source text, entered in parallel with (and necessarily duplicating) the
-//! picker's own proto-upload textarea. This is a deliberate, known
-//! duplication forced by the picker's real prop contract (locked by
-//! `GrpcSchemaPicker.test.tsx`), not an oversight — see PLAN.md #17d-11.
-//!
-//! One consequence: a method discovered via the picker's "Reflection" mode
-//! cannot be connected to from this panel at all, because reflection yields
-//! no proto source and `grpc_connect` has no other way to source a
-//! `DescriptorPool` yet (the same discovery-to-connect gap #17d-8 flagged).
-//! The Connect button is gated on proto source being non-empty for exactly
-//! this reason — it has nothing to do with which discovery mode the picker
-//! happened to use.
+//! `GrpcSchemaPicker.onMethodSelected` hands back a `GrpcMethodDescriptor`
+//! that, for a reflection-discovered method, now carries a `descriptorSet`
+//! (base64 `FileDescriptorSet` bytes from `grpc_discover_schema` — see that
+//! type's doc comment) — connecting with it needs no proto source at all.
+//! For a proto-upload-discovered method (`descriptorSet` absent), this panel
+//! still needs its own proto source text, entered in parallel with the
+//! picker's own proto-upload textarea (the picker doesn't surface the source
+//! it compiled from, only the resulting descriptor); `handleBuilderSend`
+//! branches on `method.descriptorSet` to pick which `GrpcConnectArgs` shape
+//! to send.
 //!
 //! `GrpcMessageBuilder`'s `onSend` callback emits the built request as a JSON
 //! *string*; `GrpcConnectArgs.request`/`GrpcOutbound.request` are
@@ -91,11 +79,14 @@ export function GrpcPanel({
   const urlOk = url.trim() !== "" && (scheme === "grpc" || scheme === "grpcs");
   const busy = status === "connecting" || status === "open";
   const protoOk = protoSource.trim() !== "";
+  // A reflection-discovered method carries its own descriptor set — no
+  // proto source needed to connect with it (see module doc comment).
+  const schemaReady = method != null && (method.descriptorSet != null || protoOk);
   // Pre-connect, GrpcMessageBuilder's own button doubles as the Connect
   // trigger — there's no separate "Connect" button once a method is picked,
   // since the initial request rides in `grpc_connect`'s args (the backend
   // pre-queues it onto the streaming drive loop). See module doc comment.
-  const canConnect = !busy && urlOk && method != null && protoOk;
+  const canConnect = !busy && urlOk && schemaReady;
   // Only client-streaming/bidi connections keep a live sender after
   // connect — the backend drops the sender immediately for
   // unary/server-streaming (`grpc_connect` in `commands/streaming.rs`), so
@@ -131,14 +122,25 @@ export function GrpcPanel({
     if (status !== "open") {
       // Pre-connect: the builder's button is the Connect trigger.
       if (!method) return;
-      const entryPoint = entryPointKey();
-      void connect(workspaceId, {
-        url,
-        methodFullName: method.fullName,
-        request: parsed,
-        protoFiles: { [entryPoint]: protoSource },
-        entryPoint,
-      });
+      if (method.descriptorSet != null) {
+        // Reflection-discovered: connect straight from the descriptor set,
+        // no proto source needed — the reflection-to-connect handoff.
+        void connect(workspaceId, {
+          url,
+          methodFullName: method.fullName,
+          request: parsed,
+          descriptorSet: method.descriptorSet,
+        });
+      } else {
+        const entryPoint = entryPointKey();
+        void connect(workspaceId, {
+          url,
+          methodFullName: method.fullName,
+          request: parsed,
+          protoFiles: { [entryPoint]: protoSource },
+          entryPoint,
+        });
+      }
     } else {
       // Post-connect, client-streaming/bidi: send another request message.
       void send(parsed);
@@ -240,43 +242,50 @@ export function GrpcPanel({
             Schema {method && `— ${method.fullName}`}
           </summary>
           <div className="mt-2">
-            <GrpcSchemaPicker onMethodSelected={handleMethodSelected} selectedMethodFullName={method?.fullName} />
+            <GrpcSchemaPicker
+              workspaceId={workspaceId}
+              onMethodSelected={handleMethodSelected}
+              selectedMethodFullName={method?.fullName}
+            />
           </div>
         </details>
 
-        {/* Panel-owned proto source — see module doc comment for why this
-            duplicates the picker's own proto-upload textarea instead of
-            reusing its state. Required for Connect regardless of which
-            discovery mode the picker used above. */}
-        <details className="mt-2 text-xs">
-          <summary className="cursor-pointer text-slate-500 dark:text-slate-400">
-            .proto source for connect {protoOk && "(set)"}
-          </summary>
-          <div className="mt-2 flex flex-col gap-2">
-            <p className="text-[11px] text-slate-400">
-              Connect compiles a descriptor pool from inline .proto source — there is no
-              reflection-to-connect handoff yet, so paste the same source here even if you
-              discovered this method via reflection above.
-            </p>
-            <textarea
-              value={protoSource}
-              onChange={(e) => setProtoSource(e.target.value)}
-              disabled={busy}
-              rows={4}
-              placeholder="Paste the .proto source to connect with…"
-              spellCheck={false}
-              className="resize-none rounded-md border border-slate-200 bg-transparent px-2.5 py-1.5 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-60 dark:border-slate-700"
-            />
-            <input
-              value={protoFileName}
-              onChange={(e) => setProtoFileName(e.target.value)}
-              disabled={busy}
-              placeholder={`Entry point filename (defaults to "${DEFAULT_ENTRY_POINT}")`}
-              spellCheck={false}
-              className="rounded-md border border-slate-200 bg-transparent px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-60 dark:border-slate-700"
-            />
-          </div>
-        </details>
+        {/* Panel-owned proto source — needed until a method is picked (or
+            for a proto-upload-discovered one); a reflection-discovered
+            method carries its own descriptor set and connects without it
+            (see module doc comment). Stays visible pre-pick so a reopened
+            saved request's prefilled source/filename remain visible while
+            the user re-picks a method. */}
+        {method?.descriptorSet == null && (
+          <details className="mt-2 text-xs">
+            <summary className="cursor-pointer text-slate-500 dark:text-slate-400">
+              .proto source for connect {protoOk && "(set)"}
+            </summary>
+            <div className="mt-2 flex flex-col gap-2">
+              <p className="text-[11px] text-slate-400">
+                This method was discovered via .proto upload, which doesn&apos;t carry its
+                source forward — paste it again here so Connect can compile a descriptor pool.
+              </p>
+              <textarea
+                value={protoSource}
+                onChange={(e) => setProtoSource(e.target.value)}
+                disabled={busy}
+                rows={4}
+                placeholder="Paste the .proto source to connect with…"
+                spellCheck={false}
+                className="resize-none rounded-md border border-slate-200 bg-transparent px-2.5 py-1.5 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-60 dark:border-slate-700"
+              />
+              <input
+                value={protoFileName}
+                onChange={(e) => setProtoFileName(e.target.value)}
+                disabled={busy}
+                placeholder={`Entry point filename (defaults to "${DEFAULT_ENTRY_POINT}")`}
+                spellCheck={false}
+                className="rounded-md border border-slate-200 bg-transparent px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-60 dark:border-slate-700"
+              />
+            </div>
+          </details>
+        )}
 
         {(errorMessage || buildError) && (
           <p className="mt-2 rounded-md bg-red-50 px-2 py-1 text-xs text-red-600 dark:bg-red-900/30 dark:text-red-400">
@@ -288,7 +297,7 @@ export function GrpcPanel({
           {log.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-1 p-6 text-center text-sm text-slate-400">
               <p>No events yet.</p>
-              <p className="text-xs">Pick a method, paste its .proto source, and connect.</p>
+              <p className="text-xs">Pick a method (paste its .proto source if not reflection-discovered) and connect.</p>
             </div>
           ) : (
             log.map((entry) => <LogRow key={entry.id} entry={entry} />)
