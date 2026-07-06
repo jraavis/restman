@@ -24,7 +24,7 @@ pub use environment::Environment;
 pub use history::{HistoryEntry, HistoryFilter};
 pub use mock::{MockRule, MockRuleInput, MockServer, MockServerInput};
 pub use plugin::{Plugin, PluginInput, PluginKind};
-pub use request::{SavedRequest, SavedRequestInput};
+pub use request::{RequestKind, SavedRequest, SavedRequestInput};
 pub use tab::Tab;
 pub use tag::Tag;
 pub use variable::{VarScope, VarType, Variable, VariableInput, SECRET_MASK};

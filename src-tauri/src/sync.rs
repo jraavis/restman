@@ -299,6 +299,8 @@ mod tests {
             auth: RequestAuth::Inherit,
             pre_request_script: String::new(),
             post_response_script: String::new(),
+            kind: Default::default(),
+            stream_config: None,
         };
         crate::store::requests::create(conn, &c.id, &input).unwrap();
         c.id

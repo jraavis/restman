@@ -368,6 +368,8 @@ mod tests {
                 auth: Default::default(),
                 pre_request_script: String::new(),
                 post_response_script: String::new(),
+                kind: Default::default(),
+                stream_config: None,
             },
         )
         .unwrap();

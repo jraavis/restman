@@ -31,6 +31,8 @@ function makeHit(id: string, tags: Tag[]): SearchHit {
     auth: defaultRequestAuth(),
     preRequestScript: "",
     postResponseScript: "",
+    kind: "http",
+    streamConfig: null,
     tags,
     sortOrder: 0,
     createdAt: 0,

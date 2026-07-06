@@ -1,15 +1,20 @@
-//! Ephemeral WebSocket client — connect to any `ws(s)://` endpoint, send
-//! text/binary frames, and watch the bidirectional transcript live. Not wired
-//! into saved requests/collections (see PLAN.md #17b) — same standalone
+//! WebSocket client — connect to any `ws(s)://` endpoint, send text/binary
+//! frames, and watch the bidirectional transcript live. Standalone
 //! connect/watch/disconnect surface and modal shell as `SsePanel`, plus a
 //! send composer. The handshake goes through the workspace's reqwest transport
 //! (proxy / client cert / default headers), unlike a raw browser WebSocket.
+//! Can be saved into a collection (`streamConfig` on a `kind: "ws"`
+//! `SavedRequest`) and reopened prefilled via `savedRequest`.
 
 import { useState } from "react";
-import { ArrowDown, ArrowUp, Cable, Loader2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Cable, Loader2, Save } from "lucide-react";
 import { isValidUrl, protocolOf } from "../../lib/methods";
+import { defaultRequest } from "../../lib/http";
 import type { HeaderEntry } from "../../lib/http";
+import { defaultRequestAuth, type SavedRequest, type WsStreamConfig } from "../../lib/types";
 import { KeyValueEditor, type Pair } from "../request/KeyValueEditor";
+import { useCollections, useCreateRequest, useUpdateRequest } from "../collections/hooks";
+import { SaveRequestDialog } from "../request/SaveRequestDialog";
 import { useWsConnection, type WsLogEntry, type WsStatus } from "./wsHooks";
 
 function headersToRows(headers: HeaderEntry[]): Pair[] {
@@ -19,12 +24,31 @@ function rowsToHeaders(rows: Pair[]): HeaderEntry[] {
   return rows.map((r) => ({ name: r.key, value: r.value, enabled: r.enabled }));
 }
 
-export function WsPanel({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
-  const [url, setUrl] = useState("");
-  const [headers, setHeaders] = useState<HeaderEntry[]>([]);
+function wsConfigOf(request: SavedRequest | null | undefined): WsStreamConfig | null {
+  if (!request || request.kind !== "ws" || !request.streamConfig) return null;
+  return request.streamConfig as WsStreamConfig;
+}
+
+export function WsPanel({
+  workspaceId,
+  savedRequest,
+  onClose,
+}: {
+  workspaceId: string;
+  savedRequest?: SavedRequest | null;
+  onClose: () => void;
+}) {
+  const initial = wsConfigOf(savedRequest);
+  const [url, setUrl] = useState(initial?.url ?? "");
+  const [headers, setHeaders] = useState<HeaderEntry[]>(initial?.headers ?? []);
   const [draft, setDraft] = useState("");
   const [binary, setBinary] = useState(false);
+  const [linkedRequest, setLinkedRequest] = useState<SavedRequest | null>(savedRequest ?? null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const { status, log, errorMessage, connect, disconnect, send } = useWsConnection();
+  const { data: collections } = useCollections(workspaceId);
+  const createRequest = useCreateRequest(workspaceId);
+  const updateRequest = useUpdateRequest(workspaceId);
 
   const scheme = protocolOf(url);
   const urlOk = url.trim() !== "" && isValidUrl(url) && (scheme === "ws" || scheme === "wss");
@@ -37,6 +61,49 @@ export function WsPanel({ workspaceId, onClose }: { workspaceId: string; onClose
     setDraft("");
   }
 
+  function streamConfig(): WsStreamConfig {
+    return { url, headers };
+  }
+
+  async function handleSave(name: string, collectionId: string) {
+    const saved = await createRequest.mutateAsync({
+      collectionId,
+      input: {
+        name,
+        ...defaultRequest(),
+        method: "WS",
+        auth: defaultRequestAuth(),
+        preRequestScript: "",
+        postResponseScript: "",
+        kind: "ws",
+        streamConfig: streamConfig(),
+      },
+    });
+    setLinkedRequest(saved);
+    setSaveDialogOpen(false);
+  }
+
+  function handleUpdate() {
+    if (!linkedRequest) return;
+    updateRequest.mutate({
+      id: linkedRequest.id,
+      input: {
+        name: linkedRequest.name,
+        method: linkedRequest.method,
+        url: linkedRequest.url,
+        headers: linkedRequest.headers,
+        query: linkedRequest.query,
+        body: linkedRequest.body,
+        options: linkedRequest.options,
+        auth: linkedRequest.auth,
+        preRequestScript: linkedRequest.preRequestScript,
+        postResponseScript: linkedRequest.postResponseScript,
+        kind: "ws",
+        streamConfig: streamConfig(),
+      },
+    });
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
       <div
@@ -45,9 +112,19 @@ export function WsPanel({ workspaceId, onClose }: { workspaceId: string; onClose
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            <Cable size={14} /> WebSocket
+            <Cable size={14} /> WebSocket{linkedRequest && ` — ${linkedRequest.name}`}
           </h2>
-          <StatusBadge status={status} />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              title={linkedRequest ? "Save changes to this saved request" : "Save to a collection"}
+              onClick={() => (linkedRequest ? handleUpdate() : setSaveDialogOpen(true))}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
+            >
+              <Save size={12} /> Save
+            </button>
+            <StatusBadge status={status} />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -152,6 +229,18 @@ export function WsPanel({ workspaceId, onClose }: { workspaceId: string; onClose
           </button>
         </div>
       </div>
+
+      {saveDialogOpen && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <SaveRequestDialog
+            defaultName="WebSocket request"
+            collections={collections ?? []}
+            saving={createRequest.isPending}
+            onSave={(name, collectionId) => void handleSave(name, collectionId)}
+            onClose={() => setSaveDialogOpen(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }

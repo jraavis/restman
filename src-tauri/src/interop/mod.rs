@@ -62,6 +62,14 @@ pub struct ImportedRequest {
     pub pre_request_script: String,
     #[serde(default)]
     pub post_response_script: String,
+    /// Only restman's own export ever produces a non-`Http` kind — every
+    /// other format importer (Postman/Insomnia/Bruno/curl/OpenAPI/HAR/
+    /// http-file) only knows HTTP, so they all leave this at the derived
+    /// `Default` via `..Default::default()`.
+    #[serde(default)]
+    pub kind: crate::model::RequestKind,
+    #[serde(default)]
+    pub stream_config: Option<serde_json::Value>,
 }
 
 /// One importable/exportable collection (or folder — same shape, folders are
@@ -212,12 +220,31 @@ pub fn parse(format: ImportFormat, content: &str) -> AppResult<ImportPreview> {
 }
 
 /// Serialize `node` to `format`'s text representation.
+///
+/// These four formats (Postman/cURL/OpenAPI/HAR) only understand HTTP — a
+/// streaming-kind request's HTTP-shaped fields are unused placeholders (see
+/// `model::RequestKind`), so exporting one as-is would emit a broken item
+/// (e.g. `curl -X WS ''`, its real URL trapped in `stream_config`). Only
+/// restman's own export (`restman::export_full`, via `collect_node`) round-
+/// trips streaming requests; every other format silently drops them here
+/// rather than emit garbage.
 pub fn export(format: ExportFormat, node: &ImportedNode) -> AppResult<String> {
+    let node = strip_non_http_requests(node);
     match format {
-        ExportFormat::Postman => postman::export(node),
-        ExportFormat::Curl => curl::export(node),
-        ExportFormat::OpenApi => openapi::export(node),
-        ExportFormat::Har => har::export(node),
+        ExportFormat::Postman => postman::export(&node),
+        ExportFormat::Curl => curl::export(&node),
+        ExportFormat::OpenApi => openapi::export(&node),
+        ExportFormat::Har => har::export(&node),
+    }
+}
+
+fn strip_non_http_requests(node: &ImportedNode) -> ImportedNode {
+    ImportedNode {
+        name: node.name.clone(),
+        description: node.description.clone(),
+        auth: node.auth.clone(),
+        requests: node.requests.iter().filter(|r| r.kind == crate::model::RequestKind::Http).cloned().collect(),
+        children: node.children.iter().map(strip_non_http_requests).collect(),
     }
 }
 
@@ -288,6 +315,8 @@ fn apply_node(
             auth,
             pre_request_script: req.pre_request_script.clone(),
             post_response_script: req.post_response_script.clone(),
+            kind: req.kind,
+            stream_config: req.stream_config.clone(),
         };
         let mut persisted = false;
         match collision {
@@ -399,6 +428,8 @@ fn collect_node(conn: &Connection, collection: &Collection, hydrate_secrets: boo
                 auth,
                 pre_request_script: r.pre_request_script,
                 post_response_script: r.post_response_script,
+                kind: r.kind,
+                stream_config: r.stream_config,
             })
         })
         .collect::<AppResult<Vec<_>>>()?;
@@ -573,6 +604,41 @@ mod tests {
         let owner = crate::auth::owner_key("collection", &roots[0].id);
         let real = crate::auth::hydrate(&owner, stored.auth).unwrap();
         assert_eq!(real, AuthConfig::Bearer { token: "tok".into() });
+    }
+
+    /// Postman/cURL/OpenAPI/HAR only understand HTTP — exporting a collection
+    /// that also holds a saved WS/SSE/gRPC request must skip that request
+    /// rather than emit a broken item (e.g. `curl -X WS ''`, its real URL
+    /// trapped in `stream_config`). Regression guard for the export() dispatch
+    /// filter, using cURL since its output is trivial to assert against.
+    #[test]
+    fn export_to_curl_skips_streaming_kind_requests() {
+        use crate::model::RequestKind;
+
+        let http_req = ImportedRequest {
+            name: "Get thing".into(),
+            method: "GET".into(),
+            url: "https://api.test/thing".into(),
+            ..Default::default()
+        };
+        let ws_req = ImportedRequest {
+            name: "Live updates".into(),
+            method: "WS".into(),
+            url: String::new(),
+            kind: RequestKind::Ws,
+            stream_config: Some(serde_json::json!({ "url": "wss://example.com", "headers": [] })),
+            ..Default::default()
+        };
+        let node = ImportedNode {
+            name: "Mixed".into(),
+            requests: vec![http_req, ws_req],
+            ..Default::default()
+        };
+
+        let out = export(ExportFormat::Curl, &node).unwrap();
+        assert!(out.contains("https://api.test/thing"), "HTTP request must still export:\n{out}");
+        assert!(!out.contains("WS"), "streaming request must be skipped, not exported broken:\n{out}");
+        assert!(!out.contains("wss://example.com"), "stream_config must never leak into a format export:\n{out}");
     }
 
     /// Re-importing a file whose auth is already `SECRET_MASK` (e.g. one

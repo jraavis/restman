@@ -5,7 +5,8 @@
 //! preview/apply split on the Rust side.
 
 import { useState, type ChangeEvent } from "react";
-import { AlertTriangle, CheckCircle2, ChevronRight, File, Folder, Upload } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { AlertTriangle, CheckCircle2, ChevronRight, File, Folder, FolderOpen, Upload } from "lucide-react";
 import { ipc } from "../../lib/ipc";
 import { usePlugins } from "../plugins/hooks";
 import type {
@@ -90,8 +91,8 @@ const COLLECTION_FORMATS: { value: ImportFormat; label: string; accept: string; 
     value: "bruno",
     label: "Bruno (.bru) request",
     accept: ".bru,.txt,text/plain",
-    placeholder: "…or paste a .bru request file here",
-    blurb: "Import a single request from a Bruno .bru file. (Directory imports aren't supported here — import one .bru at a time.)",
+    placeholder: "…or paste a single .bru request file here",
+    blurb: "Import a single .bru request (file/paste below), or choose a whole Bruno collection folder to import its full tree.",
   },
   {
     value: "http_file",
@@ -142,6 +143,21 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
     const file = e.target.files?.[0];
     if (!file) return;
     void loadContent(await file.text());
+  }
+
+  async function pickBrunoDirectory() {
+    const dir = await open({ directory: true, multiple: false });
+    if (!dir || Array.isArray(dir)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const preview = await ipc.previewImportBrunoDirectory(dir);
+      setStep({ phase: "preview", preview });
+    } catch (e) {
+      setError(typeof e === "string" ? e : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function confirmImport() {
@@ -233,6 +249,16 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
                     onChange={(e) => void onFile(e)}
                     className="text-xs text-slate-600 dark:text-slate-300"
                   />
+                  {source.kind === "native" && source.format === "bruno" && (
+                    <button
+                      type="button"
+                      onClick={() => void pickBrunoDirectory()}
+                      disabled={busy}
+                      className="flex w-fit items-center gap-1.5 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      <FolderOpen size={12} /> Choose a Bruno collection folder…
+                    </button>
+                  )}
                   <textarea
                     placeholder={activeFormat?.placeholder ?? "…or paste content here"}
                     rows={10}

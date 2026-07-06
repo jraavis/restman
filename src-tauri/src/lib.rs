@@ -53,6 +53,7 @@ pub fn run() {
                 cookie_jar,
                 streams: Arc::new(Mutex::new(std::collections::HashMap::new())),
                 mock_servers: Mutex::new(std::collections::HashMap::new()),
+                grpc_schema_cache: Mutex::new(std::collections::HashMap::new()),
             });
             Ok(())
         })
@@ -131,6 +132,7 @@ pub fn run() {
             commands::run_collection_tests,
             commands::get_oauth_token_preview,
             commands::preview_import,
+            commands::preview_import_bruno_directory,
             commands::apply_collection_import,
             commands::export_collection,
             commands::preview_environment_import,

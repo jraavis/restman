@@ -130,6 +130,7 @@ fn parse_request(req: &Value, warnings: &mut Vec<String>) -> ImportedRequest {
         auth,
         pre_request_script: String::new(),
         post_response_script: String::new(),
+        ..Default::default()
     }
 }
 
@@ -491,6 +492,7 @@ mod tests {
             auth: RequestAuth::Inherit,
             pre_request_script: String::new(),
             post_response_script: String::new(),
+            ..Default::default()
         };
         let node = ImportedNode { name: "x".into(), description: None, auth: AuthConfig::None, requests: vec![req], children: vec![] };
         let out = export(&node).unwrap();

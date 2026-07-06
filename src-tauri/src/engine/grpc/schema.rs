@@ -56,6 +56,9 @@ use prost_reflect::DescriptorPool;
 use protox::file::{ChainFileResolver, File as ProtoFile, FileResolver, GoogleFileResolver};
 use protox::{Compiler, Error as ProtoxError};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::Mutex;
 
 /// User-supplied `.proto` files, keyed by the relative path their own
 /// `import "..."` statements (and other files' imports of them) reference —
@@ -126,6 +129,56 @@ pub(crate) fn compile_proto_set(
             "compiled .proto file set produced an invalid descriptor pool: {e}"
         ))
     })
+}
+
+/// `AppState`'s home for cached `compile_proto_set` results — see
+/// `compile_proto_set_cached`.
+pub(crate) type DescriptorPoolCache = Mutex<HashMap<String, DescriptorPool>>;
+
+fn cache_key(files: &ProtoFileSet, entry_points: &[String]) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // `files` is a `BTreeMap`, so this iterates in a stable order already —
+    // no separate sort needed before feeding the hasher.
+    for (path, source) in files {
+        path.hash(&mut hasher);
+        source.hash(&mut hasher);
+    }
+    entry_points.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// `compile_proto_set`, memoized by the content of `files`/`entry_points`.
+///
+/// Without this, `grpc_connect` recompiled the same `.proto` source from
+/// scratch on every single connect — a known follow-up from 17d-8/17d-11.
+/// Keyed by a hash of the actual file contents (not a caller-supplied id), so
+/// identical source always hits the cache and different source always
+/// misses it, with no explicit invalidation step to get wrong. Unbounded
+/// growth (no LRU/eviction) is an accepted, documented trade-off: this is a
+/// desktop app compiling a handful of user-maintained `.proto` schemas, not
+/// a multi-tenant server under memory pressure. `DescriptorPool` is
+/// `Arc`-backed internally ("This type uses reference counting internally
+/// so it is cheap to clone" — its own doc comment, confirmed against the
+/// vendored 0.16.4 source before relying on it here), so cloning one out of
+/// the cache on every hit is not a real copy of the compiled schema.
+///
+/// Scope: this only helps the upload/`grpc_connect` path. The
+/// server-reflection path (`engine::grpc::reflection`) builds its pool from
+/// live-fetched file descriptors — a different construction with no connect
+/// handoff of its own yet — so recompiling a reflection-discovered schema
+/// isn't a cost this cache addresses.
+pub(crate) fn compile_proto_set_cached(
+    cache: &DescriptorPoolCache,
+    files: &ProtoFileSet,
+    entry_points: &[String],
+) -> AppResult<DescriptorPool> {
+    let key = cache_key(files, entry_points);
+    if let Some(pool) = cache.lock().unwrap().get(&key) {
+        return Ok(pool.clone());
+    }
+    let pool = compile_proto_set(files, entry_points)?;
+    cache.lock().unwrap().insert(key, pool.clone());
+    Ok(pool)
 }
 
 /// Turns a `protox::Error` into a clean, user-facing `AppError`, special-casing
@@ -344,5 +397,75 @@ mod tests {
             message.contains("imported from \"importer/main.proto\""),
             "error should attribute the missing import to its importer, got: {message}"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // compile_proto_set_cached
+    // -----------------------------------------------------------------
+
+    fn new_cache() -> DescriptorPoolCache {
+        Mutex::new(HashMap::new())
+    }
+
+    #[test]
+    fn cache_miss_compiles_and_populates_the_cache() {
+        let cache = new_cache();
+        let mut files = ProtoFileSet::new();
+        files.insert("main.proto".to_string(), "syntax = \"proto3\";\nmessage Foo {}\n".to_string());
+        let entry_points = vec!["main.proto".to_string()];
+
+        assert!(cache.lock().unwrap().is_empty());
+        let pool = compile_proto_set_cached(&cache, &files, &entry_points)
+            .expect("valid proto source should compile");
+        assert!(pool.get_message_by_name("Foo").is_some());
+        assert_eq!(cache.lock().unwrap().len(), 1, "a miss must populate the cache for the next call");
+    }
+
+    /// Proves a cache *hit* actually skips recompiling, not just that a
+    /// second call with the same input happens to succeed (which it would
+    /// either way). Spoofs the cache by inserting a pool compiled from
+    /// entirely different source under the exact key
+    /// `compile_proto_set_cached` computes for `files`/`entry_points` below —
+    /// if the real compile ran again, the result would contain `Real`, not
+    /// `Spoofed`.
+    #[test]
+    fn cache_hit_returns_the_cached_pool_without_recompiling() {
+        let mut files = ProtoFileSet::new();
+        files.insert("main.proto".to_string(), "syntax = \"proto3\";\nmessage Real {}\n".to_string());
+        let entry_points = vec!["main.proto".to_string()];
+        let key = cache_key(&files, &entry_points);
+
+        let mut spoof_files = ProtoFileSet::new();
+        spoof_files.insert("spoof.proto".to_string(), "syntax = \"proto3\";\nmessage Spoofed {}\n".to_string());
+        let spoofed_pool = compile_proto_set(&spoof_files, &["spoof.proto".to_string()])
+            .expect("spoof source should compile");
+
+        let cache = new_cache();
+        cache.lock().unwrap().insert(key, spoofed_pool);
+
+        let result = compile_proto_set_cached(&cache, &files, &entry_points)
+            .expect("cached lookup should succeed without touching the compiler");
+
+        assert!(result.get_message_by_name("Spoofed").is_some(), "expected the cached (spoofed) pool, not a fresh compile");
+        assert!(result.get_message_by_name("Real").is_none(), "must not have recompiled `files` — that would produce `Real`, not `Spoofed`");
+    }
+
+    #[test]
+    fn different_proto_source_gets_its_own_cache_entry() {
+        let cache = new_cache();
+        let entry_points = vec!["main.proto".to_string()];
+
+        let mut files_a = ProtoFileSet::new();
+        files_a.insert("main.proto".to_string(), "syntax = \"proto3\";\nmessage A {}\n".to_string());
+        let mut files_b = ProtoFileSet::new();
+        files_b.insert("main.proto".to_string(), "syntax = \"proto3\";\nmessage B {}\n".to_string());
+
+        let pool_a = compile_proto_set_cached(&cache, &files_a, &entry_points).unwrap();
+        let pool_b = compile_proto_set_cached(&cache, &files_b, &entry_points).unwrap();
+
+        assert!(pool_a.get_message_by_name("A").is_some());
+        assert!(pool_b.get_message_by_name("B").is_some());
+        assert!(pool_b.get_message_by_name("A").is_none(), "different source must not collide with another entry's cached pool");
+        assert_eq!(cache.lock().unwrap().len(), 2, "distinct content must get distinct cache entries");
     }
 }

@@ -10,7 +10,7 @@
 //! thin persistence layer with no send-time concerns.
 
 use crate::error::{AppError, AppResult};
-use crate::engine::http::TransportOverrides;
+use crate::engine::http::{ClientCertPem, TransportOverrides};
 use crate::model::ClientCertConfig;
 use crate::model::http::{HeaderEntry, HttpRequest};
 use crate::secrets;
@@ -27,10 +27,15 @@ pub fn resolve_transport(conn: &Connection, workspace_id: &str) -> AppResult<Opt
         return Ok(None);
     }
     let identity = build_identity(workspace_id, &settings.client_cert)?;
+    let (client_identity, client_cert_pem) = match identity {
+        Some((identity, pem)) => (Some(identity), Some(pem)),
+        None => (None, None),
+    };
     Ok(Some(TransportOverrides {
         proxy_url: settings.proxy_url,
         proxy_bypass: settings.proxy_bypass,
-        client_identity: identity,
+        client_identity,
+        client_cert_pem,
     }))
 }
 
@@ -57,7 +62,10 @@ fn keychain_slot(workspace_id: &str, slot: &str) -> String {
     format!("wscert:{workspace_id}:{slot}")
 }
 
-fn build_identity(workspace_id: &str, cert: &ClientCertConfig) -> AppResult<Option<reqwest::Identity>> {
+fn build_identity(
+    workspace_id: &str,
+    cert: &ClientCertConfig,
+) -> AppResult<Option<(reqwest::Identity, ClientCertPem)>> {
     match cert {
         ClientCertConfig::None => Ok(None),
         ClientCertConfig::Paste { cert_pem, key_pem, passphrase } => {
@@ -87,9 +95,9 @@ fn build_identity(workspace_id: &str, cert: &ClientCertConfig) -> AppResult<Opti
             pem.push('\n');
             pem.push_str(&key_real);
             let _ = pass_real; // reqwest's native-tls Identity::from_pem doesn't take a passphrase
-            reqwest::Identity::from_pem(pem.as_bytes())
-                .map(Some)
-                .map_err(|e| AppError::Other(format!("invalid client certificate PEM: {e}")))
+            let identity = reqwest::Identity::from_pem(pem.as_bytes())
+                .map_err(|e| AppError::Other(format!("invalid client certificate PEM: {e}")))?;
+            Ok(Some((identity, ClientCertPem { cert_pem: cert_real, key_pem: key_real })))
         }
         ClientCertConfig::Path { cert_path, key_path, passphrase: _ } => {
             if cert_path.is_empty() || key_path.is_empty() {
@@ -101,12 +109,15 @@ fn build_identity(workspace_id: &str, cert: &ClientCertConfig) -> AppResult<Opti
             let key_bytes = std::fs::read(key_path).map_err(|e| {
                 AppError::Other(format!("failed to read client key at \"{key_path}\": {e}"))
             })?;
-            let mut pem = String::from_utf8_lossy(&cert_bytes).to_string();
+            let cert_real = String::from_utf8_lossy(&cert_bytes).to_string();
+            let key_real = String::from_utf8_lossy(&key_bytes).to_string();
+            let mut pem = cert_real.clone();
             pem.push('\n');
-            pem.push_str(&String::from_utf8_lossy(&key_bytes));
-            reqwest::Identity::from_pem(pem.as_bytes())
-                .map(Some)
-                .map_err(|e| AppError::Other(format!("invalid client certificate PEM at \"{cert_path}\": {e}")))
+            pem.push_str(&key_real);
+            let identity = reqwest::Identity::from_pem(pem.as_bytes()).map_err(|e| {
+                AppError::Other(format!("invalid client certificate PEM at \"{cert_path}\": {e}"))
+            })?;
+            Ok(Some((identity, ClientCertPem { cert_pem: cert_real, key_pem: key_real })))
         }
     }
 }

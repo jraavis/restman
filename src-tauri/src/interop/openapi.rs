@@ -254,6 +254,7 @@ fn build_operation_v3(
         auth,
         pre_request_script: String::new(),
         post_response_script: String::new(),
+        ..Default::default()
     };
     Operation { tag, request }
 }
@@ -721,6 +722,7 @@ fn build_operation_v2(
         auth,
         pre_request_script: String::new(),
         post_response_script: String::new(),
+        ..Default::default()
     };
     Operation { tag, request }
 }

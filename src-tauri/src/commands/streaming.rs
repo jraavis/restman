@@ -23,12 +23,14 @@
 //! command error (there's no command-result caller left listening by the
 //! time a long-lived connection actually drops).
 //!
-//! Known limitation, surfaced here and in `GrpcTransport::connect`'s doc
-//! comment: gRPC connections do not yet honor the workspace's proxy or
-//! client-certificate settings (the hand-rolled h2/rustls client has no path
-//! to either — see that doc comment for the full explanation). A configured
-//! proxy/client-cert is a clean `AppError` from `grpc_connect`, never a
-//! silent direct/unauthenticated connection.
+//! gRPC connections honor the workspace's proxy and client-certificate
+//! settings too, despite the hand-rolled h2/rustls client having no reqwest
+//! `Client` to inherit them from: `GrpcTransport::connect` dials an HTTP
+//! `CONNECT` tunnel through a configured proxy before TLS/h2 starts, and
+//! builds its own client-auth rustls `ClientConfig` from the raw PEM
+//! `TransportOverrides.client_cert_pem` carries alongside the opaque
+//! `reqwest::Identity` the other protocols use — see that doc comment for
+//! the full explanation.
 
 use crate::engine::grpc::{self, transport::GrpcTransport};
 use crate::engine::http::{build_client, build_ws_client};
@@ -176,8 +178,11 @@ pub async fn grpc_connect(
         crate::workspace::resolve_transport(&conn, &workspace_id)?
     };
 
-    let pool =
-        grpc::schema::compile_proto_set(&args.proto_files, std::slice::from_ref(&args.entry_point))?;
+    let pool = grpc::schema::compile_proto_set_cached(
+        &state.grpc_schema_cache,
+        &args.proto_files,
+        std::slice::from_ref(&args.entry_point),
+    )?;
     let method = grpc::resolve_method(&pool, &args.method_full_name)?;
     let is_unary = !method.is_client_streaming() && !method.is_server_streaming();
 

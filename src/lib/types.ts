@@ -270,6 +270,37 @@ export interface Tag {
   color: string;
 }
 
+// Discriminates what a saved request actually is — mirrors
+// `model::request::RequestKind`. `Http` is the original tab-backed shape;
+// the streaming kinds instead carry their connect config in `streamConfig`
+// (opaque per-kind shape the frontend owns — see `StreamConfig` below). The
+// HTTP-shaped fields (`method`/`headers`/`query`/`body`/`options`) on a
+// streaming-kind row are unused placeholders, not a second source of truth.
+export type RequestKind = "http" | "sse" | "ws" | "grpc";
+
+export interface SseStreamConfig {
+  url: string;
+  headers: HeaderEntry[];
+}
+
+export interface WsStreamConfig {
+  url: string;
+  headers: HeaderEntry[];
+}
+
+// Only `url`/`methodFullName`/`protoSource`/`protoFileName` survive a save —
+// there's no reflection-to-connect handoff yet (see `GrpcPanel`'s module doc
+// comment), so reopening a saved gRPC request prefills the connect form but
+// still requires re-running discovery to pick the method again.
+export interface GrpcStreamConfig {
+  url: string;
+  methodFullName: string | null;
+  protoSource: string;
+  protoFileName: string;
+}
+
+export type StreamConfig = SseStreamConfig | WsStreamConfig | GrpcStreamConfig;
+
 export interface SavedRequest {
   id: string;
   collectionId: string;
@@ -283,6 +314,8 @@ export interface SavedRequest {
   auth: RequestAuth;
   preRequestScript: string;
   postResponseScript: string;
+  kind: RequestKind;
+  streamConfig: StreamConfig | null;
   tags: Tag[];
   sortOrder: number;
   createdAt: number;
@@ -301,6 +334,8 @@ export interface SavedRequestInput {
   auth: RequestAuth;
   preRequestScript: string;
   postResponseScript: string;
+  kind: RequestKind;
+  streamConfig: StreamConfig | null;
 }
 
 export interface SearchHit {
@@ -407,6 +442,8 @@ export interface ImportedRequest {
   query: KeyValue[];
   body: RequestBody;
   options: RequestOptions;
+  kind?: RequestKind;
+  streamConfig?: StreamConfig | null;
   auth: RequestAuth;
   preRequestScript: string;
   postResponseScript: string;

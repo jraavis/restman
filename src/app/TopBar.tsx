@@ -27,6 +27,7 @@ import { ToolsDialog } from "../features/tools/ToolsDialog";
 import { WindowControls } from "../components/WindowControls";
 import { useDismissable } from "../lib/useDismissable";
 import { useUiStore } from "../stores/uiStore";
+import { useStreamingPanelStore } from "../stores/streamingPanelStore";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const isMac = /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
@@ -50,12 +51,12 @@ export function TopBar() {
   const updateWs = useUpdateWorkspace();
   const deleteWs = useDeleteWorkspace();
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+  const streamingPanel = useStreamingPanelStore((s) => s.panel);
+  const openStreamingPanel = useStreamingPanelStore((s) => s.openStreamingPanel);
+  const closeStreamingPanel = useStreamingPanelStore((s) => s.closeStreamingPanel);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [cookiesOpen, setCookiesOpen] = useState(false);
-  const [streamingOpen, setStreamingOpen] = useState(false);
-  const [wsOpen, setWsOpen] = useState(false);
-  const [grpcOpen, setGrpcOpen] = useState(false);
   const [wsSettingsOpen, setWsSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [mockServersOpen, setMockServersOpen] = useState(false);
@@ -246,7 +247,7 @@ export function TopBar() {
         <button
           type="button"
           disabled={!active}
-          onClick={() => setStreamingOpen(true)}
+          onClick={() => openStreamingPanel("sse")}
           title="SSE streaming"
           className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800"
         >
@@ -255,7 +256,7 @@ export function TopBar() {
         <button
           type="button"
           disabled={!active}
-          onClick={() => setWsOpen(true)}
+          onClick={() => openStreamingPanel("ws")}
           title="WebSocket"
           className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800"
         >
@@ -264,7 +265,7 @@ export function TopBar() {
         <button
           type="button"
           disabled={!active}
-          onClick={() => setGrpcOpen(true)}
+          onClick={() => openStreamingPanel("grpc")}
           title="gRPC"
           className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800"
         >
@@ -290,14 +291,14 @@ export function TopBar() {
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} workspaceId={active?.id} />}
       {toolsOpen && <ToolsDialog onClose={() => setToolsOpen(false)} />}
       {cookiesOpen && <CookieJarDialog onClose={() => setCookiesOpen(false)} />}
-      {streamingOpen && active && (
-        <SsePanel workspaceId={active.id} onClose={() => setStreamingOpen(false)} />
+      {streamingPanel?.kind === "sse" && active && (
+        <SsePanel workspaceId={active.id} savedRequest={streamingPanel.savedRequest} onClose={closeStreamingPanel} />
       )}
-      {wsOpen && active && (
-        <WsPanel workspaceId={active.id} onClose={() => setWsOpen(false)} />
+      {streamingPanel?.kind === "ws" && active && (
+        <WsPanel workspaceId={active.id} savedRequest={streamingPanel.savedRequest} onClose={closeStreamingPanel} />
       )}
-      {grpcOpen && active && (
-        <GrpcPanel workspaceId={active.id} onClose={() => setGrpcOpen(false)} />
+      {streamingPanel?.kind === "grpc" && active && (
+        <GrpcPanel workspaceId={active.id} savedRequest={streamingPanel.savedRequest} onClose={closeStreamingPanel} />
       )}
       {wsSettingsOpen && active && (
         <WorkspaceSettingsDialog

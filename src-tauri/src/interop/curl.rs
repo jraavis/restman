@@ -188,6 +188,7 @@ pub fn parse(content: &str) -> AppResult<ImportPreview> {
         auth,
         pre_request_script: String::new(),
         post_response_script: String::new(),
+        ..Default::default()
     };
 
     let root = ImportedNode { name, description: None, auth: AuthConfig::None, requests: vec![request], children: vec![] };
@@ -560,6 +561,7 @@ mod tests {
             auth: RequestAuth::Own(AuthConfig::Bearer { token: "tok".into() }),
             pre_request_script: String::new(),
             post_response_script: String::new(),
+            ..Default::default()
         };
         let node = ImportedNode { name: "x".into(), description: None, auth: AuthConfig::None, requests: vec![req], children: vec![] };
         let out = export(&node).unwrap();

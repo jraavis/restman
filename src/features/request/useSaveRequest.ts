@@ -43,6 +43,8 @@ export function useSaveRequest(workspaceId: string | undefined) {
       auth,
       preRequestScript,
       postResponseScript,
+      kind: "http",
+      streamConfig: null,
     };
 
     if (requestId) {

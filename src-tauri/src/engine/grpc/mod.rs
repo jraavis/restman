@@ -844,6 +844,116 @@ mod unary_call_tests {
         server.await.expect("server task did not finish cleanly");
     }
 
+    /// Proves the descriptor-pool cache (`schema::compile_proto_set_cached`)
+    /// isn't just a fast no-op that happens to also work in isolation —
+    /// a pool served from a cache *hit* still drives a real unary RPC over a
+    /// real loopback h2+TLS connection exactly like a freshly-compiled one.
+    /// Compiles the same source twice through one shared cache (the second
+    /// call is a hit, proven separately and more directly in
+    /// `schema::tests::cache_hit_returns_the_cached_pool_without_recompiling`)
+    /// and drives `call_unary` with the pool that call returns.
+    #[tokio::test(flavor = "current_thread")]
+    async fn call_unary_round_trips_using_a_cached_descriptor_pool() {
+        let cache: super::schema::DescriptorPoolCache = std::sync::Mutex::new(std::collections::HashMap::new());
+        let mut files = super::schema::ProtoFileSet::new();
+        files.insert("greeter.proto".to_string(), UNARY_PROTO.to_string());
+        let entry_points = vec!["greeter.proto".to_string()];
+
+        let _first = super::schema::compile_proto_set_cached(&cache, &files, &entry_points)
+            .expect("first compile should populate the cache");
+        let pool = super::schema::compile_proto_set_cached(&cache, &files, &entry_points)
+            .expect("second call should be a cache hit");
+
+        let (cert, key) = self_signed_cert();
+        let server_cfg = server_config(cert.clone(), key);
+        let client_cfg = test_client_config(cert);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+
+        let server = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.expect("server accept tcp");
+            let acceptor = TlsAcceptor::from(server_cfg);
+            let tls = acceptor.accept(sock).await.expect("server tls handshake");
+
+            let mut conn = h2::server::handshake(tls).await.expect("server h2 handshake");
+            let (request, mut respond) = conn
+                .accept()
+                .await
+                .expect("server should see an incoming stream")
+                .expect("server accept should not error");
+            tokio::spawn(async move { while conn.accept().await.is_some() {} });
+
+            let mut body = request.into_body();
+            let mut received = Vec::new();
+            while let Some(chunk) = body.data().await {
+                let chunk = chunk.expect("server body read");
+                received.extend_from_slice(&chunk);
+                let _ = body.flow_control().release_capacity(chunk.len());
+            }
+            let payload = &received[5..];
+            let local_pool = unary_test_pool();
+            let req_desc = local_pool.get_message_by_name("unarytest.HelloRequest").unwrap();
+            let req_msg = DynamicMessage::decode(req_desc, payload).expect("decode HelloRequest");
+            let name = req_msg
+                .get_field_by_name("name")
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default();
+
+            let resp_desc = local_pool.get_message_by_name("unarytest.HelloResponse").unwrap();
+            let mut resp_msg = DynamicMessage::new(resp_desc);
+            resp_msg.set_field_by_name("message", Value::String(format!("Hello, {name}!")));
+            let resp_bytes = resp_msg.encode_to_vec();
+
+            let response = http::Response::builder()
+                .status(200)
+                .body(())
+                .expect("server response head");
+            let mut send_stream = respond
+                .send_response(response, false)
+                .expect("server send_response");
+            send_stream
+                .send_data(Bytes::from(super::framing::frame(&resp_bytes)), false)
+                .expect("server send_data");
+
+            let mut trailers = HeaderMap::new();
+            trailers.insert("grpc-status", "0".parse().unwrap());
+            send_stream
+                .send_trailers(trailers)
+                .expect("server send_trailers");
+        });
+
+        let sock = TcpStream::connect(addr).await.expect("client tcp connect");
+        let connector = TlsConnector::from(client_cfg);
+        let domain = ServerName::try_from("localhost").expect("server name");
+        let tls = connector
+            .connect(domain, sock)
+            .await
+            .expect("client tls handshake");
+
+        let mut transport = GrpcTransport::drive(tls, "localhost:0".to_string(), true)
+            .await
+            .expect("client h2 handshake over the loopback TLS session");
+
+        let request_json = serde_json::json!({ "name": "cache" });
+        let result = call_unary(
+            &pool,
+            "unarytest.Greeter/SayHello",
+            request_json,
+            &mut transport,
+        )
+        .await
+        .expect("call_unary should drive the full exchange using the cached pool");
+
+        assert_eq!(result.status.code, 0);
+        assert_eq!(
+            result.response,
+            Some(serde_json::json!({ "message": "Hello, cache!" }))
+        );
+
+        server.await.expect("server task did not finish cleanly");
+    }
+
     /// Closes a verification gap the happy-path test above can't see: that
     /// test's server always sends `grpc-status: 0`, so a `call_unary` bug
     /// that silently defaulted to `code: 0` without ever actually reading

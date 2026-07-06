@@ -3,11 +3,14 @@
 //! via a small hover-revealed context menu.
 
 import { useState } from "react";
-import { Copy, MoreHorizontal, Pencil, Tags, Trash2 } from "lucide-react";
+import { Cable, Copy, MoreHorizontal, Network, Pencil, Radio, Tags, Trash2 } from "lucide-react";
 import { methodBadgeClasses } from "../../lib/methods";
 import { useDismissable } from "../../lib/useDismissable";
 import type { SavedRequest } from "../../lib/types";
 import { TagPicker } from "./TagPicker";
+
+const STREAMING_KIND_ICON = { sse: Radio, ws: Cable, grpc: Network } as const;
+const STREAMING_KIND_LABEL = { sse: "SSE", ws: "WS", grpc: "gRPC" } as const;
 
 export function RequestRow({
   request,
@@ -53,11 +56,24 @@ export function RequestRow({
           : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800")
       }
     >
-      <span
-        className={"shrink-0 rounded border px-1 text-[10px] font-bold " + methodBadgeClasses(request.method)}
-      >
-        {request.method}
-      </span>
+      {request.kind === "http" ? (
+        <span
+          className={"shrink-0 rounded border px-1 text-[10px] font-bold " + methodBadgeClasses(request.method)}
+        >
+          {request.method}
+        </span>
+      ) : (
+        <span
+          title={STREAMING_KIND_LABEL[request.kind]}
+          className="flex shrink-0 items-center gap-0.5 rounded border border-slate-300 px-1 text-[10px] font-bold text-slate-500 dark:border-slate-600 dark:text-slate-400"
+        >
+          {(() => {
+            const Icon = STREAMING_KIND_ICON[request.kind];
+            return <Icon size={10} />;
+          })()}
+          {STREAMING_KIND_LABEL[request.kind]}
+        </span>
+      )}
 
       {editing ? (
         <input

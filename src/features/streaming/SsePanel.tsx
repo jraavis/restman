@@ -1,14 +1,18 @@
-//! Ephemeral SSE connection viewer — connect to any `text/event-stream`
-//! endpoint and watch dispatched frames live. Not yet wired into saved
-//! requests/collections (see PLAN.md #17a) — this is the standalone
-//! connect/watch/disconnect surface, same modal-shell pattern as
-//! `CookieJarDialog`.
+//! Connect to any `text/event-stream` endpoint and watch dispatched frames
+//! live. Standalone connect/watch/disconnect surface, same modal-shell
+//! pattern as `CookieJarDialog` — but can now be saved into a collection
+//! (`streamConfig` on a `kind: "sse"` `SavedRequest`) and reopened prefilled
+//! via `savedRequest`, see `useOpenRequest`/`streamingPanelStore`.
 
 import { useState } from "react";
-import { Loader2, Radio } from "lucide-react";
+import { Loader2, Radio, Save } from "lucide-react";
 import { isValidUrl } from "../../lib/methods";
+import { defaultRequest } from "../../lib/http";
 import type { HeaderEntry } from "../../lib/http";
+import { defaultRequestAuth, type SavedRequest, type SseStreamConfig } from "../../lib/types";
 import { KeyValueEditor, type Pair } from "../request/KeyValueEditor";
+import { useCollections, useCreateRequest, useUpdateRequest } from "../collections/hooks";
+import { SaveRequestDialog } from "../request/SaveRequestDialog";
 import { useSseConnection, type SseLogEntry, type SseStatus } from "./hooks";
 
 function headersToRows(headers: HeaderEntry[]): Pair[] {
@@ -18,13 +22,75 @@ function rowsToHeaders(rows: Pair[]): HeaderEntry[] {
   return rows.map((r) => ({ name: r.key, value: r.value, enabled: r.enabled }));
 }
 
-export function SsePanel({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
-  const [url, setUrl] = useState("");
-  const [headers, setHeaders] = useState<HeaderEntry[]>([]);
+function sseConfigOf(request: SavedRequest | null | undefined): SseStreamConfig | null {
+  if (!request || request.kind !== "sse" || !request.streamConfig) return null;
+  return request.streamConfig as SseStreamConfig;
+}
+
+export function SsePanel({
+  workspaceId,
+  savedRequest,
+  onClose,
+}: {
+  workspaceId: string;
+  savedRequest?: SavedRequest | null;
+  onClose: () => void;
+}) {
+  const initial = sseConfigOf(savedRequest);
+  const [url, setUrl] = useState(initial?.url ?? "");
+  const [headers, setHeaders] = useState<HeaderEntry[]>(initial?.headers ?? []);
+  const [linkedRequest, setLinkedRequest] = useState<SavedRequest | null>(savedRequest ?? null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const { status, log, errorMessage, connect, disconnect } = useSseConnection();
+  const { data: collections } = useCollections(workspaceId);
+  const createRequest = useCreateRequest(workspaceId);
+  const updateRequest = useUpdateRequest(workspaceId);
 
   const urlOk = url.trim() !== "" && isValidUrl(url);
   const busy = status === "connecting" || status === "open";
+
+  function streamConfig(): SseStreamConfig {
+    return { url, headers };
+  }
+
+  async function handleSave(name: string, collectionId: string) {
+    const saved = await createRequest.mutateAsync({
+      collectionId,
+      input: {
+        name,
+        ...defaultRequest(),
+        method: "SSE",
+        auth: defaultRequestAuth(),
+        preRequestScript: "",
+        postResponseScript: "",
+        kind: "sse",
+        streamConfig: streamConfig(),
+      },
+    });
+    setLinkedRequest(saved);
+    setSaveDialogOpen(false);
+  }
+
+  function handleUpdate() {
+    if (!linkedRequest) return;
+    updateRequest.mutate({
+      id: linkedRequest.id,
+      input: {
+        name: linkedRequest.name,
+        method: linkedRequest.method,
+        url: linkedRequest.url,
+        headers: linkedRequest.headers,
+        query: linkedRequest.query,
+        body: linkedRequest.body,
+        options: linkedRequest.options,
+        auth: linkedRequest.auth,
+        preRequestScript: linkedRequest.preRequestScript,
+        postResponseScript: linkedRequest.postResponseScript,
+        kind: "sse",
+        streamConfig: streamConfig(),
+      },
+    });
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
@@ -34,9 +100,19 @@ export function SsePanel({ workspaceId, onClose }: { workspaceId: string; onClos
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            <Radio size={14} /> SSE Stream
+            <Radio size={14} /> SSE Stream{linkedRequest && ` — ${linkedRequest.name}`}
           </h2>
-          <StatusBadge status={status} />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              title={linkedRequest ? "Save changes to this saved request" : "Save to a collection"}
+              onClick={() => (linkedRequest ? handleUpdate() : setSaveDialogOpen(true))}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
+            >
+              <Save size={12} /> Save
+            </button>
+            <StatusBadge status={status} />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -109,6 +185,18 @@ export function SsePanel({ workspaceId, onClose }: { workspaceId: string; onClos
           </button>
         </div>
       </div>
+
+      {saveDialogOpen && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <SaveRequestDialog
+            defaultName="SSE request"
+            collections={collections ?? []}
+            saving={createRequest.isPending}
+            onSave={(name, collectionId) => void handleSave(name, collectionId)}
+            onClose={() => setSaveDialogOpen(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }

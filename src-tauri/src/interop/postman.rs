@@ -91,6 +91,7 @@ fn parse_request_item(item: &Value, warnings: &mut Vec<String>) -> ImportedReque
         auth,
         pre_request_script,
         post_response_script,
+        ..Default::default()
     }
 }
 

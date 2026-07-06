@@ -186,6 +186,8 @@ export const ipc = {
       format: "format" in source ? source.format : null,
       pluginId: "pluginId" in source ? source.pluginId : null,
     }),
+  previewImportBrunoDirectory: (path: string) =>
+    invoke<ImportPreview>("preview_import_bruno_directory", { path }),
   applyCollectionImport: (
     workspaceId: string,
     parentId: string | null,

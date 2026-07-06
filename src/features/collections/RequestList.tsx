@@ -120,6 +120,8 @@ export function RequestList({
                   auth: request.auth,
                   preRequestScript: request.preRequestScript,
                   postResponseScript: request.postResponseScript,
+                  kind: request.kind,
+                  streamConfig: request.streamConfig,
                 },
               })
             }

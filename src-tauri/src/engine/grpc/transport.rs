@@ -20,16 +20,18 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use base64::Engine as _;
 use bytes::Bytes;
 use h2::client::{ResponseFuture, SendRequest};
 use h2::SendStream;
 use http::{HeaderMap, Request, StatusCode};
-use rustls::pki_types::ServerName;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
+use crate::engine::http::ClientCertPem;
 use crate::error::AppError;
 
 use super::framing::{frame, FrameUnframer};
@@ -80,18 +82,133 @@ fn parse_target(url: &str) -> Result<Target, AppError> {
 /// Builds a rustls client config trusting the OS/Mozilla root store
 /// (`webpki-roots`, mirroring the `rustls-tls-native-roots` precedent reqwest
 /// already uses elsewhere in this codebase) with ALPN pinned to `h2` — gRPC
-/// never negotiates HTTP/1.1.
-fn webpki_client_config() -> Arc<ClientConfig> {
+/// never negotiates HTTP/1.1. When `client_cert` is set, the session also
+/// presents that certificate for mTLS — the rustls-side counterpart of
+/// `TransportOverrides.client_identity`, which reqwest/ws/sse consume via
+/// their own opaque `reqwest::Identity` instead.
+fn client_config(client_cert: Option<&ClientCertPem>) -> Result<Arc<ClientConfig>, AppError> {
     let mut roots = RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    let mut cfg = ClientConfig::builder_with_provider(provider)
+    let builder = ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .expect("rustls: safe protocol versions")
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+        .with_root_certificates(roots);
+    let mut cfg = match client_cert {
+        Some(pem) => {
+            let (certs, key) = parse_client_identity(pem)?;
+            builder
+                .with_client_auth_cert(certs, key)
+                .map_err(|e| AppError::Other(format!("invalid gRPC client certificate: {e}")))?
+        }
+        None => builder.with_no_client_auth(),
+    };
     cfg.alpn_protocols = vec![b"h2".to_vec()];
-    Arc::new(cfg)
+    Ok(Arc::new(cfg))
+}
+
+/// Parses the raw cert/key PEM `resolve_transport` hydrated from the
+/// keychain/disk into rustls' DER types. Mirrors `reqwest::Identity::from_pem`'s
+/// scope exactly (same source bytes, same "encrypted keys unsupported"
+/// limitation) rather than adding passphrase-decryption logic this codebase
+/// doesn't have anywhere else yet: `rustls_pemfile::private_key` returns
+/// `Ok(None)` for a key it can't parse as a bare PKCS#8/PKCS#1/SEC1 key
+/// (including an encrypted one), which is turned into a clean, explicit
+/// `AppError` here rather than an opaque downstream TLS failure.
+fn parse_client_identity(
+    pem: &ClientCertPem,
+) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), AppError> {
+    let certs = rustls_pemfile::certs(&mut pem.cert_pem.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Other(format!("invalid client certificate PEM: {e}")))?;
+    if certs.is_empty() {
+        return Err(AppError::Other(
+            "client certificate PEM contains no certificates".into(),
+        ));
+    }
+    let key = rustls_pemfile::private_key(&mut pem.key_pem.as_bytes())
+        .map_err(|e| AppError::Other(format!("invalid client certificate private key: {e}")))?
+        .ok_or_else(|| {
+            AppError::Other(
+                "client certificate private key is not in a supported format (encrypted/passphrase-protected keys are not supported)".into(),
+            )
+        })?;
+    Ok((certs, key))
+}
+
+/// Dials `proxy_url` (an `http://` proxy — TLS-to-proxy is not supported, a
+/// clean upfront error rather than silently skipping the tunnel) and issues
+/// an HTTP `CONNECT` for `target_authority`, returning the raw TCP stream once
+/// the proxy answers `200`. The returned stream is exactly as if it were
+/// dialed directly at the target — the caller layers TLS/h2 on top the same
+/// way either way. Proxy credentials in the URL's userinfo (if any) are sent
+/// as `Proxy-Authorization: Basic`, mirroring what `reqwest::Proxy::all`
+/// does with the same URL shape elsewhere in this codebase.
+async fn connect_through_proxy(proxy_url: &str, target_authority: &str) -> Result<TcpStream, AppError> {
+    let proxy = reqwest::Url::parse(proxy_url)
+        .map_err(|e| AppError::Other(format!("invalid gRPC proxy URL \"{proxy_url}\": {e}")))?;
+    if proxy.scheme() != "http" {
+        return Err(AppError::Other(format!(
+            "gRPC proxy support only handles http:// proxies (TLS-to-proxy is not supported); got scheme \"{}\"",
+            proxy.scheme()
+        )));
+    }
+    let proxy_host = proxy
+        .host_str()
+        .ok_or_else(|| AppError::Other(format!("missing host in gRPC proxy URL: {proxy_url}")))?;
+    let proxy_port = proxy.port_or_known_default().unwrap_or(80);
+    let proxy_authority = format!("{proxy_host}:{proxy_port}");
+
+    let mut stream = TcpStream::connect(&proxy_authority)
+        .await
+        .map_err(|e| AppError::Other(format!("gRPC proxy TCP connect to {proxy_authority} failed: {e}")))?;
+    stream.set_nodelay(true).ok();
+
+    let mut request = format!("CONNECT {target_authority} HTTP/1.1\r\nHost: {target_authority}\r\n");
+    if !proxy.username().is_empty() {
+        let creds = base64::engine::general_purpose::STANDARD
+            .encode(format!("{}:{}", proxy.username(), proxy.password().unwrap_or("")));
+        request.push_str(&format!("Proxy-Authorization: Basic {creds}\r\n"));
+    }
+    request.push_str("\r\n");
+
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| AppError::Other(format!("failed to send CONNECT to gRPC proxy: {e}")))?;
+
+    // Read the proxy's response one byte at a time until the header
+    // terminator, so we never read past the header block into bytes that
+    // belong to the tunneled TLS/h2 session on the other side of `200`.
+    let mut buf = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        let n = stream
+            .read(&mut byte)
+            .await
+            .map_err(|e| AppError::Other(format!("failed reading CONNECT response from gRPC proxy: {e}")))?;
+        if n == 0 {
+            return Err(AppError::Other(
+                "gRPC proxy closed the connection before completing CONNECT".into(),
+            ));
+        }
+        buf.push(byte[0]);
+        if buf.len() >= 4 && buf[buf.len() - 4..] == *b"\r\n\r\n" {
+            break;
+        }
+        if buf.len() > 8192 {
+            return Err(AppError::Other("gRPC proxy CONNECT response headers too large".into()));
+        }
+    }
+    let response = String::from_utf8_lossy(&buf);
+    let status_line = response.lines().next().unwrap_or("");
+    let status_code = status_line.split_whitespace().nth(1).unwrap_or("");
+    if status_code != "200" {
+        return Err(AppError::Other(format!(
+            "gRPC proxy CONNECT to {target_authority} failed: {status_line}"
+        )));
+    }
+    Ok(stream)
 }
 
 /// A connected gRPC transport: an h2 client handle plus the connection driver
@@ -149,48 +266,40 @@ impl GrpcTransport {
     /// over the session otherwise.
     ///
     /// `transport` is the same `engine::http::TransportOverrides` that
-    /// `engine::ws::connect`/SSE/HTTP honor for proxy/client-cert settings —
-    /// but unlike those (which upgrade *through* a reqwest `Client` and so
-    /// inherit reqwest's proxy/TLS handling for free), this client speaks raw
-    /// h2 over a hand-rolled `tokio-rustls` session (see this module's own
-    /// doc comment for why: reqwest can't see HTTP/2 trailers). That means
-    /// none of `TransportOverrides`' fields can actually be honored here yet:
-    /// `proxy_url` would need a hand-written HTTP `CONNECT` tunnel before the
-    /// TLS handshake even starts, and `client_identity` is an opaque
-    /// `reqwest::Identity` with no path to a rustls `ClientConfig` (it would
-    /// need raw PEM/DER material from workspace settings instead). Both are
-    /// real follow-up features, not wiring. Rather than silently bypassing a
-    /// configured proxy or client cert — which would be both a likely
-    /// connection failure behind a corporate proxy *and* an unexpected
-    /// direct-connect/data-egress surprise for mTLS users — a configured-but-
-    /// unsupported setting is a clean upfront `AppError`, never a silent
-    /// no-op.
+    /// `engine::ws::connect`/SSE/HTTP honor for proxy/client-cert settings.
+    /// Unlike those (which upgrade *through* a reqwest `Client` and so inherit
+    /// reqwest's proxy/TLS handling for free), this client speaks raw h2 over
+    /// a hand-rolled `tokio-rustls` session (see this module's own doc
+    /// comment for why: reqwest can't see HTTP/2 trailers), so both settings
+    /// are handled by hand here: `proxy_url` via a plain HTTP `CONNECT`
+    /// tunnel dialed before TLS/h2 starts (`connect_through_proxy`), and
+    /// `client_identity` via the raw PEM `TransportOverrides.client_cert_pem`
+    /// carries alongside the opaque `reqwest::Identity` (`client_config`
+    /// builds a client-auth rustls `ClientConfig` from it).
     pub(crate) async fn connect(
         url: &str,
         transport: Option<&crate::engine::http::TransportOverrides>,
     ) -> Result<Self, AppError> {
-        if let Some(t) = transport {
-            if t.proxy_url.as_deref().is_some_and(|p| !p.trim().is_empty()) {
-                return Err(AppError::Other(
-                    "gRPC connections do not yet honor the workspace proxy setting; configure a direct grpc(s):// target or clear the workspace proxy".into(),
-                ));
-            }
-            if t.client_identity.is_some() {
-                return Err(AppError::Other(
-                    "gRPC connections do not yet honor the workspace client-certificate setting".into(),
-                ));
-            }
-        }
-
         let target = parse_target(url)?;
         let authority = format!("{}:{}", target.host, target.port);
-        let tcp = TcpStream::connect(&authority)
-            .await
-            .map_err(|e| AppError::Other(format!("gRPC TCP connect to {authority} failed: {e}")))?;
-        tcp.set_nodelay(true).ok();
+
+        let proxy_url = transport
+            .and_then(|t| t.proxy_url.as_deref())
+            .filter(|p| !p.trim().is_empty());
+        let tcp = match proxy_url {
+            Some(proxy_url) => connect_through_proxy(proxy_url, &authority).await?,
+            None => {
+                let tcp = TcpStream::connect(&authority)
+                    .await
+                    .map_err(|e| AppError::Other(format!("gRPC TCP connect to {authority} failed: {e}")))?;
+                tcp.set_nodelay(true).ok();
+                tcp
+            }
+        };
 
         if target.tls {
-            let config = webpki_client_config();
+            let client_cert = transport.and_then(|t| t.client_cert_pem.as_ref());
+            let config = client_config(client_cert)?;
             let connector = TlsConnector::from(config);
             let server_name = ServerName::try_from(target.host.clone()).map_err(|e| {
                 AppError::Other(format!("invalid TLS server name {:?}: {e}", target.host))
@@ -867,70 +976,245 @@ mod tests {
         assert!(parse_target("grpc://").is_err());
     }
 
-    // --- connect()'s unsupported-transport-setting guard (no network) -----
-    //
-    // These prove the guard fires *before* any TCP connect is attempted —
-    // no loopback server needed, since a configured proxy/client-cert
-    // setting must error immediately, not after a failed/successful dial.
-
     #[tokio::test(flavor = "current_thread")]
-    async fn connect_rejects_configured_proxy_explicitly() {
-        let overrides = crate::engine::http::TransportOverrides {
-            proxy_url: Some("http://proxy.example:8080".to_string()),
-            ..Default::default()
-        };
-        let result = GrpcTransport::connect("grpc://127.0.0.1:1", Some(&overrides)).await;
-        let err = match result {
-            Ok(_) => panic!("a configured proxy must be rejected, never silently bypassed"),
-            Err(e) => e,
-        };
-        assert!(err.to_string().contains("proxy"));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn connect_rejects_configured_client_identity_explicitly() {
-        // A real reqwest::Identity needs valid PEM/PKCS12 bytes to construct,
-        // which this test doesn't need — only that *some* Some(_) is present
-        // triggers the guard, so build one from a minimal but well-formed
-        // self-signed cert+key pair (rcgen, same dev-only dependency the
-        // loopback tests above already use).
-        let params = rcgen::CertificateParams::new(vec!["localhost".to_string()])
-            .expect("rcgen: subject alt names");
-        let key_pair = rcgen::KeyPair::generate().expect("rcgen: generate keypair");
-        let cert = params
-            .self_signed(&key_pair)
-            .expect("rcgen: self-signed cert");
-        let pem = format!("{}{}", cert.pem(), key_pair.serialize_pem());
-        let identity = reqwest::Identity::from_pem(pem.as_bytes())
-            .expect("rcgen-issued cert+key should form a valid reqwest::Identity");
-
-        let overrides = crate::engine::http::TransportOverrides {
-            client_identity: Some(identity),
-            ..Default::default()
-        };
-        let result = GrpcTransport::connect("grpc://127.0.0.1:1", Some(&overrides)).await;
-        let err = match result {
-            Ok(_) => panic!("a configured client identity must be rejected, never silently bypassed"),
-            Err(e) => e,
-        };
-        assert!(err.to_string().contains("client-certificate"));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn connect_with_no_overrides_does_not_hit_the_guard() {
-        // Sanity check the guard's negative case compiles/behaves: passing
-        // None must reach the real connect attempt (and fail there, on a
-        // refused loopback port, rather than on the guard).
+    async fn connect_with_no_overrides_reaches_the_real_dial() {
         let result = GrpcTransport::connect("grpc://127.0.0.1:1", None).await;
         let err = match result {
-            Ok(_) => panic!(
-                "connecting to an unused loopback port should fail at the dial, not the guard"
-            ),
+            Ok(_) => panic!("connecting to an unused loopback port should fail at the dial"),
             Err(e) => e,
         };
-        assert!(
-            !err.to_string().contains("does not yet honor"),
-            "with no overrides at all, the guard must not fire"
-        );
+        assert!(err.to_string().contains("TCP connect"));
     }
+
+    // --- proxy: HTTP CONNECT tunnel ----------------------------------------
+
+    /// A minimal forward proxy: accepts one connection, reads a `CONNECT`
+    /// request, dials the target itself, answers `200`, then splices bytes
+    /// bidirectionally — the same shape a real corporate proxy presents.
+    async fn run_test_connect_proxy(proxy_listener: TcpListener) {
+        let (mut client_sock, _) = proxy_listener.accept().await.expect("proxy accept");
+        let mut buf = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            let n = client_sock.read(&mut byte).await.expect("proxy read CONNECT");
+            assert!(n > 0, "client closed before completing CONNECT");
+            buf.push(byte[0]);
+            if buf.len() >= 4 && buf[buf.len() - 4..] == *b"\r\n\r\n" {
+                break;
+            }
+        }
+        let request_text = String::from_utf8_lossy(&buf);
+        let request_line = request_text.lines().next().unwrap_or("");
+        assert!(
+            request_line.starts_with("CONNECT "),
+            "expected a CONNECT request, got: {request_line}"
+        );
+        let target = request_line.split_whitespace().nth(1).unwrap_or("");
+        let mut origin_sock = TcpStream::connect(target).await.expect("proxy dial origin");
+        client_sock
+            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            .await
+            .expect("proxy send 200");
+        tokio::io::copy_bidirectional(&mut client_sock, &mut origin_sock)
+            .await
+            .ok();
+    }
+
+    /// Proves `GrpcTransport::connect` actually tunnels through a configured
+    /// proxy rather than dialing the target directly: the "origin" listener
+    /// only accepts a connection *from the proxy*, so a real h2 client
+    /// preface completing against it means the CONNECT tunnel carried real
+    /// h2 traffic, not just a bare TCP handshake.
+    #[tokio::test(flavor = "current_thread")]
+    async fn connect_tunnels_through_http_connect_proxy() {
+        let origin_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind origin");
+        let origin_addr = origin_listener.local_addr().expect("origin addr");
+        let origin = tokio::spawn(async move {
+            let (sock, _) = origin_listener.accept().await.expect("origin accept");
+            let _conn = h2::server::handshake(sock)
+                .await
+                .expect("origin h2 handshake should complete through the tunnel");
+        });
+
+        let proxy_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+        let proxy_addr = proxy_listener.local_addr().expect("proxy addr");
+        let proxy = tokio::spawn(run_test_connect_proxy(proxy_listener));
+
+        let overrides = crate::engine::http::TransportOverrides {
+            proxy_url: Some(format!("http://{proxy_addr}")),
+            ..Default::default()
+        };
+        GrpcTransport::connect(&format!("grpc://{origin_addr}"), Some(&overrides))
+            .await
+            .expect("connect through proxy should succeed");
+
+        origin.await.expect("origin task panicked");
+        proxy.await.expect("proxy task panicked");
+    }
+
+    /// A proxy that refuses the tunnel (a non-200 CONNECT response) must
+    /// surface as a connect error, not a silent fallback to a direct dial.
+    #[tokio::test(flavor = "current_thread")]
+    async fn connect_surfaces_proxy_connect_refusal() {
+        let proxy_listener = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+        let proxy_addr = proxy_listener.local_addr().expect("proxy addr");
+        let proxy = tokio::spawn(async move {
+            let (mut client_sock, _) = proxy_listener.accept().await.expect("proxy accept");
+            let mut buf = Vec::new();
+            let mut byte = [0u8; 1];
+            loop {
+                let n = client_sock.read(&mut byte).await.expect("proxy read CONNECT");
+                assert!(n > 0);
+                buf.push(byte[0]);
+                if buf.len() >= 4 && buf[buf.len() - 4..] == *b"\r\n\r\n" {
+                    break;
+                }
+            }
+            client_sock
+                .write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
+                .await
+                .expect("proxy send 502");
+        });
+
+        let overrides = crate::engine::http::TransportOverrides {
+            proxy_url: Some(format!("http://{proxy_addr}")),
+            ..Default::default()
+        };
+        let result = GrpcTransport::connect("grpc://127.0.0.1:1", Some(&overrides)).await;
+        let err = match result {
+            Ok(_) => panic!("a proxy CONNECT refusal must surface as an error"),
+            Err(e) => e,
+        };
+        assert!(err.to_string().contains("502"));
+        proxy.await.expect("proxy task panicked");
+    }
+
+    // --- mTLS: client certificate authentication ---------------------------
+
+    /// Builds a `ClientConfig` exactly like `client_config`'s client-cert
+    /// branch, but trusting the test's self-signed server root instead of
+    /// the real webpki store — mirrors `test_client_config`'s rationale.
+    fn test_client_config_with_identity(
+        server_root: CertificateDer<'static>,
+        client_cert: &ClientCertPem,
+    ) -> Arc<ClientConfig> {
+        let mut roots = RootCertStore::empty();
+        roots.add(server_root).expect("add self-signed server cert as trusted root");
+        let (certs, key) = parse_client_identity(client_cert).expect("parse test client identity");
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let mut cfg = ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("rustls: safe protocol versions")
+            .with_root_certificates(roots)
+            .with_client_auth_cert(certs, key)
+            .expect("rustls: install client auth cert");
+        cfg.alpn_protocols = vec![b"h2".to_vec()];
+        Arc::new(cfg)
+    }
+
+    /// A server config that *requires* a client certificate, trusting only
+    /// `client_root` — the same shape a corporate gRPC server enforcing mTLS
+    /// presents.
+    fn server_config_requiring_client_cert(
+        cert: CertificateDer<'static>,
+        key: PrivateKeyDer<'static>,
+        client_root: CertificateDer<'static>,
+    ) -> Arc<ServerConfig> {
+        let mut roots = RootCertStore::empty();
+        roots.add(client_root).expect("add client root");
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+            Arc::new(roots),
+            provider.clone(),
+        )
+        .build()
+        .expect("build client cert verifier");
+        let mut cfg = ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("rustls: safe protocol versions")
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(vec![cert], key)
+            .expect("rustls: load self-signed cert/key");
+        cfg.alpn_protocols = vec![b"h2".to_vec()];
+        Arc::new(cfg)
+    }
+
+    fn self_signed_client_identity() -> (ClientCertPem, CertificateDer<'static>) {
+        let params = rcgen::CertificateParams::new(vec!["restman-client".to_string()])
+            .expect("rcgen: subject alt names");
+        let key_pair = rcgen::KeyPair::generate().expect("rcgen: generate keypair");
+        let cert = params.self_signed(&key_pair).expect("rcgen: self-signed cert");
+        let der = cert.der().clone();
+        let pem = ClientCertPem {
+            cert_pem: cert.pem(),
+            key_pem: key_pair.serialize_pem(),
+        };
+        (pem, der)
+    }
+
+    /// Proves mTLS actually authenticates the client, not just that two TLS
+    /// stacks agree to talk: a server requiring a client cert accepts the
+    /// handshake when the (matching-root) client cert is presented, and
+    /// rejects it outright when it isn't.
+    #[tokio::test(flavor = "current_thread")]
+    async fn mtls_handshake_succeeds_only_when_client_cert_presented() {
+        let (server_cert, server_key) = self_signed_cert();
+        let (client_pem, client_root) = self_signed_client_identity();
+        let server_cfg =
+            server_config_requiring_client_cert(server_cert.clone(), server_key, client_root);
+        let client_cfg = test_client_config_with_identity(server_cert.clone(), &client_pem);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let server = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.expect("accept");
+            let acceptor = TlsAcceptor::from(server_cfg);
+            acceptor
+                .accept(sock)
+                .await
+                .expect("server should accept a client presenting the required cert");
+        });
+
+        let sock = TcpStream::connect(addr).await.expect("client tcp connect");
+        let connector = TlsConnector::from(client_cfg);
+        let domain = ServerName::try_from("localhost").expect("server name");
+        connector
+            .connect(domain, sock)
+            .await
+            .expect("client tls handshake with client cert should succeed");
+        server.await.expect("server task did not finish cleanly");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mtls_handshake_rejected_without_client_cert() {
+        let (server_cert, server_key) = self_signed_cert();
+        let (_unused_pem, client_root) = self_signed_client_identity();
+        let server_cfg =
+            server_config_requiring_client_cert(server_cert.clone(), server_key, client_root);
+        // No client identity this time — same trusted server root, but the
+        // client presents no certificate at all.
+        let client_cfg = test_client_config(server_cert.clone());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let server = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.expect("accept");
+            let acceptor = TlsAcceptor::from(server_cfg);
+            let result = acceptor.accept(sock).await;
+            assert!(
+                result.is_err(),
+                "server requiring a client cert must reject a handshake with none presented"
+            );
+        });
+
+        let sock = TcpStream::connect(addr).await.expect("client tcp connect");
+        let connector = TlsConnector::from(client_cfg);
+        let domain = ServerName::try_from("localhost").expect("server name");
+        // The client side may see the handshake fail too (server closes the
+        // connection); either outcome is fine, the server-side assertion
+        // above is the one that matters.
+        let _ = connector.connect(domain, sock).await;
+        server.await.expect("server task did not finish cleanly");
+    }
+
 }

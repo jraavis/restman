@@ -560,6 +560,45 @@ mod tests {
         }
     }
 
+    /// A saved streaming request (kind + opaque `stream_config`) must survive
+    /// export_full → apply_full into a fresh DB just like an HTTP request's
+    /// body does above — this is the exact path saving a WS/SSE/gRPC request
+    /// into a collection, then exporting/reimporting the workspace, exercises.
+    #[test]
+    fn streaming_kind_and_config_survive_a_restman_round_trip() {
+        use crate::model::RequestKind;
+
+        let (conn, ws_id) = seeded_conn();
+        let config = serde_json::json!({ "url": "wss://example.com", "headers": [] });
+        let tree = ImportedNode {
+            name: "Streaming".into(),
+            requests: vec![ImportedRequest {
+                name: "live updates".into(),
+                method: "WS".into(),
+                url: String::new(),
+                kind: RequestKind::Ws,
+                stream_config: Some(config.clone()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        interop::apply_import(&conn, &ws_id, None, &tree, ConflictMode::Skip).unwrap();
+
+        let json = export_full(&conn, &[ws_id], false, false).unwrap();
+
+        let mut fresh = crate::store::db::open_in_memory().unwrap();
+        crate::store::workspaces::ensure_default(&mut fresh).unwrap();
+        apply_full(&fresh, &json, ConflictMode::Skip).unwrap();
+
+        let ws = store::workspaces::list(&fresh).unwrap().into_iter().next().unwrap();
+        let roots = store::collections::list_children(&fresh, &ws.id, None).unwrap();
+        let col = roots.iter().find(|c| c.name == "Streaming").unwrap();
+        let reqs = store::requests::list_by_collection(&fresh, &col.id).unwrap();
+        let req = reqs.iter().find(|r| r.name == "live updates").unwrap();
+        assert_eq!(req.kind, RequestKind::Ws);
+        assert_eq!(req.stream_config, Some(config));
+    }
+
     /// Two workspaces with nested folders, scripts, secret auth, and secret
     /// variables at every scope.
     fn seed_rich(conn: &mut Connection, default_ws: &str) -> String {

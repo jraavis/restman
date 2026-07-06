@@ -7,6 +7,7 @@ import { useState, type DragEvent, type KeyboardEvent } from "react";
 import { confirmDelete } from "../../lib/confirmDelete";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
+  Cable,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -15,8 +16,10 @@ import {
   FolderPlus,
   Lock,
   MoreHorizontal,
+  Network,
   Pencil,
   Play,
+  Radio,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -24,7 +27,7 @@ import { useDismissable } from "../../lib/useDismissable";
 import { textToBase64 } from "../../lib/encoding";
 import { defaultRequest } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
-import { defaultRequestAuth, type Collection, type ExportFormat } from "../../lib/types";
+import { defaultRequestAuth, type Collection, type ExportFormat, type RequestKind } from "../../lib/types";
 import { usePlugins } from "../plugins/hooks";
 import { CollectionAuthDialog } from "./CollectionAuthDialog";
 import { CollectionRunner } from "./CollectionRunner";
@@ -66,7 +69,7 @@ export function CollectionNode({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(collection.name);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [creating, setCreating] = useState<"folder" | "request" | null>(null);
+  const [creating, setCreating] = useState<"folder" | RequestKind | null>(null);
   const [draftName, setDraftName] = useState("");
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [runnerOpen, setRunnerOpen] = useState(false);
@@ -99,7 +102,7 @@ export function CollectionNode({
     }
   }
 
-  function startCreating(kind: "folder" | "request") {
+  function startCreating(kind: "folder" | RequestKind) {
     setMenuOpen(false);
     if (!expanded) onToggleExpand(collection.id);
     setDraftName("");
@@ -108,21 +111,35 @@ export function CollectionNode({
 
   async function commitCreate() {
     const trimmed = draftName.trim();
+    const kind = creating;
     setCreating(null);
-    if (!trimmed) return;
-    if (creating === "folder") {
+    if (!trimmed || !kind) return;
+    if (kind === "folder") {
       createCollection.mutate({ parentId: collection.id, name: trimmed });
       return;
     }
+    const base = {
+      name: trimmed,
+      ...defaultRequest(),
+      auth: defaultRequestAuth(),
+      preRequestScript: "",
+      postResponseScript: "",
+    };
     const saved = await createRequest.mutateAsync({
       collectionId: collection.id,
-      input: {
-        name: trimmed,
-        ...defaultRequest(),
-        auth: defaultRequestAuth(),
-        preRequestScript: "",
-        postResponseScript: "",
-      },
+      input:
+        kind === "sse"
+          ? { ...base, method: "SSE", kind, streamConfig: { url: "", headers: [] } }
+          : kind === "ws"
+            ? { ...base, method: "WS", kind, streamConfig: { url: "", headers: [] } }
+            : kind === "grpc"
+              ? {
+                  ...base,
+                  method: "GRPC",
+                  kind,
+                  streamConfig: { url: "", methodFullName: null, protoSource: "", protoFileName: "" },
+                }
+              : { ...base, kind, streamConfig: null },
     });
     open(saved);
   }
@@ -243,10 +260,31 @@ export function CollectionNode({
             >
               <button
                 type="button"
-                onClick={() => startCreating("request")}
+                onClick={() => startCreating("http")}
                 className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
               >
                 <FilePlus size={12} /> New request
+              </button>
+              <button
+                type="button"
+                onClick={() => startCreating("sse")}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Radio size={12} /> New SSE request
+              </button>
+              <button
+                type="button"
+                onClick={() => startCreating("ws")}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Cable size={12} /> New WebSocket request
+              </button>
+              <button
+                type="button"
+                onClick={() => startCreating("grpc")}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
+                <Network size={12} /> New gRPC request
               </button>
               <button
                 type="button"

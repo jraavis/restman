@@ -226,15 +226,16 @@ pub fn duplicate(conn: &Connection, id: &str, new_name: Option<&str>) -> AppResu
 
 fn copy_children(conn: &Connection, from_id: &str, to_id: &str) -> AppResult<()> {
     let mut req_stmt = conn.prepare(
-        "SELECT id, name, method, url, headers_json, query_json, body_json, options_json, auth_json FROM requests WHERE collection_id = ?1 ORDER BY sort_order ASC",
+        "SELECT id, name, method, url, headers_json, query_json, body_json, options_json, auth_json, kind, stream_config_json FROM requests WHERE collection_id = ?1 ORDER BY sort_order ASC",
     )?;
-    let requests: Vec<(String, String, String, String, String, String, String, String, String)> = req_stmt
+    #[allow(clippy::type_complexity)]
+    let requests: Vec<(String, String, String, String, String, String, String, String, String, String, Option<String>)> = req_stmt
         .query_map(params![from_id], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let now = now_millis();
-    for (i, (old_id, name, method, url, headers_json, query_json, body_json, options_json, auth_json)) in requests.into_iter().enumerate() {
+    for (i, (old_id, name, method, url, headers_json, query_json, body_json, options_json, auth_json, kind, stream_config_json)) in requests.into_iter().enumerate() {
         let new_id = Uuid::new_v4().to_string();
         let old_owner = crate::auth::owner_key("request", &old_id);
         let original_auth: crate::model::auth::RequestAuth = serde_json::from_str(&auth_json).unwrap_or_default();
@@ -242,9 +243,9 @@ fn copy_children(conn: &Connection, from_id: &str, to_id: &str) -> AppResult<()>
         let new_owner = crate::auth::owner_key("request", &new_id);
         let masked_auth = crate::auth::persist_request_auth(&new_owner, auth)?;
         conn.execute(
-            "INSERT INTO requests (id, collection_id, name, method, url, headers_json, query_json, body_json, options_json, auth_json, sort_order, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
-            params![new_id, to_id, name, method, url, headers_json, query_json, body_json, options_json, serde_json::to_string(&masked_auth)?, i as i64, now],
+            "INSERT INTO requests (id, collection_id, name, method, url, headers_json, query_json, body_json, options_json, auth_json, kind, stream_config_json, sort_order, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
+            params![new_id, to_id, name, method, url, headers_json, query_json, body_json, options_json, serde_json::to_string(&masked_auth)?, kind, stream_config_json, i as i64, now],
         )?;
     }
 
@@ -286,6 +287,8 @@ mod tests {
             auth: RequestAuth::default(),
             pre_request_script: String::new(),
             post_response_script: String::new(),
+            kind: Default::default(),
+            stream_config: None,
         }
     }
 

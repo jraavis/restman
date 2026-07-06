@@ -33,6 +33,8 @@ function makeSavedRequest(overrides: Partial<SavedRequest> = {}): SavedRequest {
     auth: defaultRequestAuth(),
     preRequestScript: "",
     postResponseScript: "",
+    kind: "http",
+    streamConfig: null,
     tags: [],
     sortOrder: 0,
     createdAt: 0,

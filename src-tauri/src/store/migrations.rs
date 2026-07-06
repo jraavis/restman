@@ -269,6 +269,20 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE workspace_settings ADD COLUMN sync_mode TEXT NOT NULL DEFAULT 'off';
     ALTER TABLE workspace_settings ADD COLUMN sync_format TEXT NOT NULL DEFAULT 'json';
     "#,
+    // v9 — streaming request kinds. A saved request can now represent an
+    // SSE/WebSocket/gRPC connection config instead of an HTTP request;
+    // `kind` discriminates ('http' | 'sse' | 'ws' | 'grpc') and
+    // `stream_config_json` carries the protocol-specific connect args
+    // (url/headers/proto source/etc) as opaque JSON — the frontend owns the
+    // shape, same convention as e.g. `options_json`. Existing HTTP requests
+    // are unaffected: default kind is 'http' and stream_config_json stays
+    // NULL. The streaming panels themselves stay standalone modals (see
+    // `TopBar`/`streaming::SsePanel` etc) rather than tab-backed — this only
+    // lets them be saved into and reopened from the collection tree.
+    r#"
+    ALTER TABLE requests ADD COLUMN kind TEXT NOT NULL DEFAULT 'http';
+    ALTER TABLE requests ADD COLUMN stream_config_json TEXT;
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

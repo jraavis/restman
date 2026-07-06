@@ -22,6 +22,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
+use crate::engine::grpc::schema::DescriptorPoolCache;
 use crate::engine::grpc::GrpcRequestMsg;
 use crate::engine::mock::RunningMockServer;
 
@@ -74,4 +75,9 @@ pub struct AppState {
     /// stable DB id is the natural key, no separate connection id needed).
     /// Never auto-started on launch; only `start_mock_server` populates this.
     pub mock_servers: Mutex<HashMap<String, RunningMockServer>>,
+    /// Compiled `.proto` schemas, keyed by a content hash of their source —
+    /// see `engine::grpc::schema::compile_proto_set_cached`. Spares
+    /// `grpc_connect` from recompiling identical `.proto` source on every
+    /// single connect.
+    pub grpc_schema_cache: DescriptorPoolCache,
 }

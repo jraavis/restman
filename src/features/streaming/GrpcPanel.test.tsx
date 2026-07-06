@@ -1,24 +1,30 @@
 //! Tests for the GrpcPanel component.
 //!
-//! NOTE: this file is hand-traced against `GrpcPanel.tsx`'s logic, not
-//! run — `npx vitest run` cannot start in this sandbox (`ERR_REQUIRE_ESM`
-//! from `html-encoding-sniffer`/`@exodus/bytes`, pre-existing in
-//! `node_modules`, unrelated to this task; see PLAN.md "How to resume in a
-//! new session"). Mirrors the testing-library + mocked-ipc pattern from
+//! Mirrors the testing-library + mocked-ipc pattern from
 //! `WsPanel.test.tsx`/`SsePanel.test.tsx`, plus a mock of `./grpcSchemaIpc`
 //! since `GrpcPanel` renders the real `GrpcSchemaPicker`, which runs its own
 //! (separately mocked) discovery flow.
 
+import type { ReactElement, ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../../lib/ipc";
-import type { GrpcEvent } from "../../lib/types";
+import type { GrpcEvent, SavedRequest } from "../../lib/types";
 import { GrpcPanel } from "./GrpcPanel";
 import { discoverGrpcSchema } from "./grpcSchemaIpc";
 import type { GrpcSchema } from "./grpcSchemaTypes";
 
 vi.mock("../../lib/ipc", () => ({
-  ipc: { grpcConnect: vi.fn(), grpcSend: vi.fn(), grpcFinishSending: vi.fn(), streamDisconnect: vi.fn() },
+  ipc: {
+    grpcConnect: vi.fn(),
+    grpcSend: vi.fn(),
+    grpcFinishSending: vi.fn(),
+    streamDisconnect: vi.fn(),
+    listCollections: vi.fn().mockResolvedValue([]),
+    createRequest: vi.fn(),
+    updateRequest: vi.fn(),
+  },
 }));
 
 vi.mock("./grpcSchemaIpc", () => ({
@@ -69,7 +75,46 @@ beforeEach(() => {
   vi.mocked(ipc.grpcFinishSending).mockReset();
   vi.mocked(ipc.streamDisconnect).mockReset();
   vi.mocked(discoverGrpcSchema).mockReset();
+  vi.mocked(ipc.listCollections).mockReset().mockResolvedValue([]);
 });
+
+function renderWithClient(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  return render(ui, { wrapper });
+}
+
+function makeSavedGrpcRequest(overrides: Partial<SavedRequest> = {}): SavedRequest {
+  return {
+    id: "req-1",
+    collectionId: "col-1",
+    name: "Saved gRPC",
+    method: "GRPC",
+    url: "",
+    headers: [],
+    query: [],
+    body: { mode: "none" },
+    options: { timeoutSecs: 30, followRedirects: true, verifySsl: true, maxRedirects: 10, sendCookies: false },
+    auth: { mode: "inherit" },
+    preRequestScript: "",
+    postResponseScript: "",
+    kind: "grpc",
+    streamConfig: {
+      url: "grpc://saved.example.com:50051",
+      methodFullName: "example.Greeter/SayHello",
+      protoSource: 'syntax = "proto3"; service Greeter {}',
+      protoFileName: "greeter.proto",
+    },
+    tags: [],
+    sortOrder: 0,
+    createdAt: 0,
+    updatedAt: 0,
+    lastUsedAt: null,
+    ...overrides,
+  };
+}
 
 function typeUrl(url: string) {
   fireEvent.change(screen.getByPlaceholderText("grpc://localhost:50051"), {
@@ -99,7 +144,7 @@ async function selectMethodViaProtoUpload(schema: GrpcSchema) {
 
 describe("GrpcPanel", () => {
   it("renders closed (idle) by default with no transcript", () => {
-    render(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
     expect(screen.getByText("Idle")).toBeInTheDocument();
     expect(screen.getByText("No events yet.")).toBeInTheDocument();
     // No method picked yet, so the message builder (and therefore any
@@ -108,7 +153,7 @@ describe("GrpcPanel", () => {
   });
 
   it("keeps Connect disabled until url, method, and proto source are all set", async () => {
-    render(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
 
     // Two embedded proto-upload textareas exist (the picker's own discovery
     // textarea, and the panel's connect-time proto-source textarea) once
@@ -133,7 +178,7 @@ describe("GrpcPanel", () => {
 
   it("calls grpcConnect with protoFiles/entryPoint/methodFullName/parsed request on Connect", async () => {
     vi.mocked(ipc.grpcConnect).mockResolvedValue("conn-1");
-    render(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
 
     await selectMethodViaProtoUpload(UNARY_SCHEMA);
     typeUrl("grpc://localhost:50051");
@@ -168,7 +213,7 @@ describe("GrpcPanel", () => {
       onEvent({ type: "closed" } satisfies GrpcEvent);
       return "conn-1";
     });
-    render(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
 
     await selectMethodViaProtoUpload(UNARY_SCHEMA);
     typeUrl("grpc://localhost:50051");
@@ -189,7 +234,7 @@ describe("GrpcPanel", () => {
       onEvent({ type: "closed" } satisfies GrpcEvent);
       return "conn-1";
     });
-    render(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
 
     await selectMethodViaProtoUpload(UNARY_SCHEMA);
     typeUrl("grpc://localhost:50051");
@@ -204,7 +249,7 @@ describe("GrpcPanel", () => {
       onEvent({ type: "error", message: "gRPC TCP connect failed" } satisfies GrpcEvent);
       return "conn-1";
     });
-    render(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
 
     await selectMethodViaProtoUpload(UNARY_SCHEMA);
     typeUrl("grpc://localhost:50051");
@@ -221,7 +266,7 @@ describe("GrpcPanel", () => {
       onEvent({ type: "open" } satisfies GrpcEvent);
       return "conn-1";
     });
-    render(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
 
     await selectMethodViaProtoUpload(UNARY_SCHEMA);
     typeUrl("grpc://localhost:50051");
@@ -244,7 +289,7 @@ describe("GrpcPanel", () => {
     });
     vi.mocked(ipc.grpcSend).mockResolvedValue(undefined);
     vi.mocked(ipc.grpcFinishSending).mockResolvedValue(undefined);
-    render(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
 
     await selectMethodViaProtoUpload(BIDI_SCHEMA);
     typeUrl("grpc://localhost:50051");
@@ -274,7 +319,7 @@ describe("GrpcPanel", () => {
       onEvent({ type: "open" } satisfies GrpcEvent);
       return "conn-1";
     });
-    render(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
+    renderWithClient(<GrpcPanel workspaceId="ws1" onClose={() => {}} />);
 
     await selectMethodViaProtoUpload(UNARY_SCHEMA);
     typeUrl("grpc://localhost:50051");
@@ -284,5 +329,49 @@ describe("GrpcPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(ipc.streamDisconnect).toHaveBeenCalledWith("conn-1");
+  });
+
+  it("prefills url and proto source from a saved request's streamConfig on reopen (method still requires re-discovery)", () => {
+    const saved = makeSavedGrpcRequest();
+    renderWithClient(<GrpcPanel workspaceId="ws1" savedRequest={saved} onClose={() => {}} />);
+
+    expect(screen.getByPlaceholderText("grpc://localhost:50051")).toHaveValue(
+      "grpc://saved.example.com:50051",
+    );
+    expect(screen.getByRole("heading", { name: /Saved gRPC/ })).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(/Paste the \.proto source to connect with/),
+    ).toHaveValue('syntax = "proto3"; service Greeter {}');
+    expect(screen.getByPlaceholderText(/Entry point filename/)).toHaveValue("greeter.proto");
+
+    // No reflection-to-connect handoff yet (see module doc comment) — the
+    // method itself isn't restored, so the message builder (and any
+    // Connect button) doesn't render until the user re-picks it.
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+  });
+
+  it("updates the linked saved request in place instead of opening the save dialog", async () => {
+    vi.mocked(ipc.updateRequest).mockResolvedValue(makeSavedGrpcRequest());
+    const saved = makeSavedGrpcRequest();
+    renderWithClient(<GrpcPanel workspaceId="ws1" savedRequest={saved} onClose={() => {}} />);
+
+    typeUrl("grpc://changed.example.com:50051");
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }));
+
+    await waitFor(() =>
+      expect(ipc.updateRequest).toHaveBeenCalledWith(
+        "req-1",
+        expect.objectContaining({
+          kind: "grpc",
+          streamConfig: {
+            url: "grpc://changed.example.com:50051",
+            methodFullName: null,
+            protoSource: 'syntax = "proto3"; service Greeter {}',
+            protoFileName: "greeter.proto",
+          },
+        }),
+      ),
+    );
+    expect(screen.queryByText("Save request")).toBeNull();
   });
 });

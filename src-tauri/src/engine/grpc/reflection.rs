@@ -1,14 +1,18 @@
 //! gRPC server reflection client — v1 (`grpc.reflection.v1`) with `v1alpha`
-//! (`grpc.reflection.v1alpha`) fallback. Lands as task #26.
+//! (`grpc.reflection.v1alpha`) fallback. Lands as task #26; live RPC driving
+//! (`discover_schema`, the reflection-to-connect handoff) lands later, in
+//! the "Live schema discovery" section near the bottom of this file.
 //!
-//! ## Scope: message construction/parsing only, not the network call
+//! ## Scope: message construction/parsing, plus driving the RPC itself
 //!
-//! This module builds `ServerReflectionRequest` `DynamicMessage`s and parses
-//! `ServerReflectionResponse` `DynamicMessage`s back into a typed
+//! Most of this module builds `ServerReflectionRequest` `DynamicMessage`s and
+//! parses `ServerReflectionResponse` `DynamicMessage`s back into a typed
 //! [`ReflectionResponse`], plus a pure `should_retry_on_v1alpha` decision
-//! function. Actually driving the bidi-streaming `ServerReflectionInfo` RPC
-//! over a live `GrpcTransport` connection is later work (#28/#29) — this
-//! module has no socket code and opens no connection.
+//! function — none of that opens a connection or touches a socket.
+//! `discover_schema` (bottom of file) is the one part of this module that
+//! does: it drives the actual bidi-streaming `ServerReflectionInfo` RPC over
+//! an already-connected `GrpcTransport`, using that transport's own
+//! `send`/`send_frame`/`recv_frame`/`half_close` primitives.
 //!
 //! ## Why the schemas are inlined `const`s, not loaded from
 //! `tests/fixtures/grpc/`
@@ -85,7 +89,6 @@ use super::schema::{compile_proto_set, ProtoFileSet};
 /// `full_name()`s differ only in this package segment (see module docs), so
 /// every descriptor lookup in this module is parameterized on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // callers land in #28/#29 (RPC drive loop, Tauri commands)
 pub(crate) enum ReflectionVersion {
     V1,
     V1Alpha,
@@ -105,7 +108,6 @@ impl ReflectionVersion {
     /// `h2`'s `:path` pseudo-header needs. Exposed now so #28's drive loop
     /// has one canonical source for it per version rather than re-deriving
     /// the string at the call site.
-    #[allow(dead_code)] // caller lands in #28 (RPC drive loop)
     pub(crate) fn service_path(self) -> String {
         format!("/{}.ServerReflection/ServerReflectionInfo", self.package())
     }
@@ -440,7 +442,6 @@ fn proto_text(version: ReflectionVersion) -> &'static str {
 /// `DescriptorPool`, entirely in-memory (no filesystem, no network) via
 /// `schema::compile_proto_set` — the same primitive #27 built for runtime
 /// `.proto` uploads.
-#[allow(dead_code)] // also called by request/response helpers below
 pub(crate) fn reflection_descriptor_pool(version: ReflectionVersion) -> AppResult<DescriptorPool> {
     let mut files: ProtoFileSet = BTreeMap::new();
     files.insert("reflection.proto".to_string(), proto_text(version).to_string());
@@ -473,7 +474,6 @@ fn response_descriptor(version: ReflectionVersion) -> AppResult<MessageDescripto
 /// `version`. `host` is optional per the proto's own comments (the server is
 /// not required to validate it); an empty string is the conventional "don't
 /// care" value real clients (e.g. `grpcurl`) send.
-#[allow(dead_code)] // caller lands in #28 (RPC drive loop)
 pub(crate) fn build_list_services_request(
     version: ReflectionVersion,
     host: &str,
@@ -489,7 +489,6 @@ pub(crate) fn build_list_services_request(
 /// `DynamicMessage` for `version`. `symbol` should be a fully-qualified
 /// `<package>.<service>[.<method>]` or `<package>.<type>` name, per the
 /// proto's own field documentation.
-#[allow(dead_code)] // caller lands in #28 (RPC drive loop)
 pub(crate) fn build_file_containing_symbol_request(
     version: ReflectionVersion,
     host: &str,
@@ -509,7 +508,6 @@ pub(crate) fn build_file_containing_symbol_request(
 /// response (`ServiceResponse.name`, repeated inside
 /// `ListServiceResponse.service`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // caller lands in #28/#29
 pub(crate) struct ServiceInfo {
     pub(crate) name: String,
 }
@@ -518,7 +516,6 @@ pub(crate) struct ServiceInfo {
 /// `error_code` uses `grpc::StatusCode` numbering (e.g. `12` ==
 /// `UNIMPLEMENTED`, the value [`should_retry_on_v1alpha`] keys off).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // caller lands in #28/#29
 pub(crate) struct ReflectionError {
     pub(crate) code: i32,
     pub(crate) message: String,
@@ -529,7 +526,6 @@ pub(crate) struct ReflectionError {
 /// the (spec-legal but pathological) case where the server didn't populate
 /// any oneof member — callers should treat it like an error, not panic.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // caller lands in #28/#29
 pub(crate) enum ReflectionResponse {
     /// `file_descriptor_response`: serialized `FileDescriptorProto` bytes,
     /// one per transitive dependency the server chose to include. Still raw
@@ -559,7 +555,6 @@ pub(crate) enum ReflectionResponse {
 /// vendored crate source), so this checks each `message_response` member by
 /// name via `has_field_by_name`, in the field-number order the proto
 /// declares them.
-#[allow(dead_code)] // caller lands in #28/#29
 pub(crate) fn parse_response(msg: &DynamicMessage) -> ReflectionResponse {
     if msg.has_field_by_name("file_descriptor_response") {
         if let Some(value) = msg.get_field_by_name("file_descriptor_response") {
@@ -655,7 +650,6 @@ pub(crate) fn parse_response(msg: &DynamicMessage) -> ReflectionResponse {
 /// `parse_response` so callers that already have a `DynamicMessage` (e.g.
 /// tests constructing one directly) don't need to round-trip through bytes
 /// first.
-#[allow(dead_code)] // caller lands in #28 (RPC drive loop)
 pub(crate) fn decode_response(version: ReflectionVersion, bytes: &[u8]) -> AppResult<ReflectionResponse> {
     let desc = response_descriptor(version)?;
     let msg = DynamicMessage::decode(desc, bytes)
@@ -677,7 +671,6 @@ const GRPC_STATUS_UNIMPLEMENTED: i32 = 12;
 /// An error/unsupported signal observed while attempting reflection against
 /// one version, fed into [`should_retry_on_v1alpha`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // caller lands in #28/#29 (the retry-with-a-live-connection loop)
 pub(crate) enum ReflectionAttemptOutcome {
     /// The RPC itself could not be reached/completed at the transport level
     /// (e.g. the server has no `grpc.reflection.v1.ServerReflection`
@@ -715,7 +708,6 @@ pub(crate) enum ReflectionAttemptOutcome {
 /// `INVALID_ARGUMENT`, `PERMISSION_DENIED`) means the `v1` service exists
 /// and answered, just unfavorably; retrying on `v1alpha` would not change
 /// that outcome and would mask the real error.
-#[allow(dead_code)] // caller lands in #28/#29
 pub(crate) fn should_retry_on_v1alpha(outcome: ReflectionAttemptOutcome) -> bool {
     match outcome {
         ReflectionAttemptOutcome::ServiceUnavailable => true,
@@ -738,7 +730,6 @@ pub(crate) fn should_retry_on_v1alpha(outcome: ReflectionAttemptOutcome) -> bool
 /// response as carrying "transitive dependencies"), but enforcing or
 /// reordering that is out of scope here; this function decodes and assembles
 /// exactly what it's given.
-#[allow(dead_code)] // caller lands in #29 (treats reflection/upload schemas uniformly)
 pub(crate) fn descriptor_pool_from_file_descriptors(
     file_descriptor_protos: &[Vec<u8>],
 ) -> AppResult<DescriptorPool> {
@@ -755,6 +746,335 @@ pub(crate) fn descriptor_pool_from_file_descriptors(
         AppError::Other(format!(
             "reflection-discovered file descriptors produced an invalid descriptor pool: {e}"
         ))
+    })
+}
+
+/// Decodes a raw, already-assembled `FileDescriptorSet` byte blob (as
+/// produced by `discover_schema`'s `file_descriptor_set` output, which
+/// crosses IPC via `GrpcConnectArgs.descriptor_set`) into a `DescriptorPool`.
+/// The counterpart `grpc_connect` needs to rebuild the exact pool a
+/// reflection discovery already assembled, without re-running reflection —
+/// the reflection-to-connect handoff this whole module exists to close.
+pub(crate) fn descriptor_pool_from_file_descriptor_set_bytes(bytes: &[u8]) -> AppResult<DescriptorPool> {
+    let fds = prost_types::FileDescriptorSet::decode(bytes)
+        .map_err(|e| AppError::Other(format!("failed to decode FileDescriptorSet: {e}")))?;
+    DescriptorPool::from_file_descriptor_set(fds)
+        .map_err(|e| AppError::Other(format!("descriptor set produced an invalid descriptor pool: {e}")))
+}
+
+// --- Live schema discovery (reflection-to-connect handoff) --------------
+//
+// Everything above this point only builds/parses reflection request and
+// response messages — no socket code (see module docs). What follows
+// actually drives the bidi-streaming `ServerReflectionInfo` RPC over an
+// already-connected `GrpcTransport`, using its `send`/`send_frame`/
+// `recv_frame`/`half_close` primitives directly (the same ones
+// `call_unary`/`drive_streaming_call` in `super` use), rather than reusing
+// those two drive functions: reflection isn't a "call a method from a
+// compiled pool" operation like they are (there is no pool yet — building
+// one is the whole point), so it drives its own stream by hand instead.
+
+/// One field on a discovered method's input/output message. `type_name`
+/// mirrors the frontend's `GrpcFieldDescriptor.type` string convention
+/// (`GrpcMessageBuilder.tsx`'s `INTEGER_TYPES`/`FLOAT_TYPES` sets plus
+/// `"bool"`/`"string"`/`"bytes"`/`"message"`/`"enum"`) — nested message
+/// fields are not expanded recursively (same scope boundary the frontend
+/// mock already drew: a message field gets a JSON sub-editor, not a nested
+/// form).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DiscoveredField {
+    pub(crate) name: String,
+    pub(crate) type_name: String,
+    pub(crate) repeated: bool,
+    pub(crate) message_type_name: Option<String>,
+}
+
+/// Which of the four gRPC streaming shapes a method uses — derived from
+/// `MethodDescriptor::is_client_streaming()`/`is_server_streaming()`, never
+/// asked of the caller (same rationale `GrpcConnectArgs`' doc comment gives
+/// for not taking a redundant mode argument).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GrpcStreamingKind {
+    Unary,
+    ClientStreaming,
+    ServerStreaming,
+    Bidi,
+}
+
+/// One RPC method discovered on a service, with its request/response shape
+/// flattened out so the frontend's `GrpcMessageBuilder` can render a form
+/// without a second round-trip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DiscoveredMethod {
+    pub(crate) service_name: String,
+    pub(crate) method_name: String,
+    pub(crate) full_name: String,
+    pub(crate) streaming: GrpcStreamingKind,
+    pub(crate) input_fields: Vec<DiscoveredField>,
+    pub(crate) output_fields: Vec<DiscoveredField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DiscoveredService {
+    pub(crate) name: String,
+    pub(crate) methods: Vec<DiscoveredMethod>,
+}
+
+/// Everything `grpc_discover_schema` hands back to the frontend: the
+/// discovered services/methods for display, plus the raw encoded
+/// `FileDescriptorSet` bytes so a later `grpc_connect` call can rebuild the
+/// exact same `DescriptorPool` (via
+/// `descriptor_pool_from_file_descriptor_set_bytes`) without re-running
+/// reflection against the (possibly no-longer-reachable, or since-changed)
+/// server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DiscoveredSchema {
+    pub(crate) services: Vec<DiscoveredService>,
+    pub(crate) file_descriptor_set: Vec<u8>,
+}
+
+fn field_type_name(kind: &prost_reflect::Kind) -> (String, Option<String>) {
+    use prost_reflect::Kind;
+    match kind {
+        Kind::Double => ("double".to_string(), None),
+        Kind::Float => ("float".to_string(), None),
+        Kind::Int32 => ("int32".to_string(), None),
+        Kind::Int64 => ("int64".to_string(), None),
+        Kind::Uint32 => ("uint32".to_string(), None),
+        Kind::Uint64 => ("uint64".to_string(), None),
+        Kind::Sint32 => ("sint32".to_string(), None),
+        Kind::Sint64 => ("sint64".to_string(), None),
+        Kind::Fixed32 => ("fixed32".to_string(), None),
+        Kind::Fixed64 => ("fixed64".to_string(), None),
+        Kind::Sfixed32 => ("sfixed32".to_string(), None),
+        Kind::Sfixed64 => ("sfixed64".to_string(), None),
+        Kind::Bool => ("bool".to_string(), None),
+        Kind::String => ("string".to_string(), None),
+        Kind::Bytes => ("bytes".to_string(), None),
+        Kind::Message(m) => ("message".to_string(), Some(m.full_name().to_string())),
+        Kind::Enum(_) => ("enum".to_string(), None),
+    }
+}
+
+fn discovered_fields(desc: &prost_reflect::MessageDescriptor) -> Vec<DiscoveredField> {
+    desc.fields()
+        .map(|f| {
+            let (type_name, message_type_name) = field_type_name(&f.kind());
+            DiscoveredField {
+                name: f.name().to_string(),
+                type_name,
+                repeated: f.is_list(),
+                message_type_name,
+            }
+        })
+        .collect()
+}
+
+fn discovered_method(service_name: &str, method: prost_reflect::MethodDescriptor) -> DiscoveredMethod {
+    let streaming = match (method.is_client_streaming(), method.is_server_streaming()) {
+        (false, false) => GrpcStreamingKind::Unary,
+        (true, false) => GrpcStreamingKind::ClientStreaming,
+        (false, true) => GrpcStreamingKind::ServerStreaming,
+        (true, true) => GrpcStreamingKind::Bidi,
+    };
+    DiscoveredMethod {
+        service_name: service_name.to_string(),
+        method_name: method.name().to_string(),
+        full_name: format!("{service_name}/{}", method.name()),
+        streaming,
+        input_fields: discovered_fields(&method.input()),
+        output_fields: discovered_fields(&method.output()),
+    }
+}
+
+/// Lists services in `pool` matching `only` (a service's `full_name()`),
+/// each with its methods flattened to [`DiscoveredMethod`]. Shared by
+/// `discover_schema` (filtering to the services a live reflection query
+/// named) — a future proto-upload discovery path could reuse this with an
+/// always-true filter, but that wiring is out of this task's scope (see
+/// module docs).
+pub(crate) fn discovered_services_from_pool(
+    pool: &DescriptorPool,
+    only: impl Fn(&str) -> bool,
+) -> Vec<DiscoveredService> {
+    pool.services()
+        .filter(|s| only(s.full_name()))
+        .map(|s| DiscoveredService {
+            name: s.full_name().to_string(),
+            methods: s.methods().map(|m| discovered_method(s.full_name(), m)).collect(),
+        })
+        .collect()
+}
+
+/// One failed reflection attempt: the outcome classification
+/// [`should_retry_on_v1alpha`] decides on, paired with the actual error to
+/// surface if no fallback applies (or the fallback also fails).
+struct AttemptFailure {
+    outcome: ReflectionAttemptOutcome,
+    err: AppError,
+}
+
+/// Opens a fresh stream for `version`'s `ServerReflectionInfo` RPC, sends a
+/// `list_services` request, and reads exactly one response. On any failure
+/// (transport-level, or a `ServerReflectionResponse.error_response`),
+/// classifies it into a [`ReflectionAttemptOutcome`] so the caller can decide
+/// whether a `v1alpha` retry applies.
+async fn try_list_services(
+    transport: &mut super::transport::GrpcTransport,
+    host: &str,
+    version: ReflectionVersion,
+) -> Result<(super::transport::GrpcStream, Vec<ServiceInfo>), AttemptFailure> {
+    let unavailable = |err: AppError| AttemptFailure {
+        outcome: ReflectionAttemptOutcome::ServiceUnavailable,
+        err,
+    };
+
+    let mut stream = transport
+        .send(&version.service_path())
+        .await
+        .map_err(unavailable)?;
+    let request = build_list_services_request(version, host).map_err(unavailable)?;
+    stream
+        .send_frame(&request.encode_to_vec(), false)
+        .map_err(unavailable)?;
+
+    let frame = stream.recv_frame().await.map_err(unavailable)?;
+    let Some(bytes) = frame else {
+        // No data frame at all — a "Trailers-Only" response, most commonly
+        // an older server that has no `v1` `ServerReflection` service
+        // registered and so answers with an immediate `UNIMPLEMENTED`.
+        let status = super::resolve_call_status(&mut stream).await.map_err(unavailable)?;
+        let outcome = if status.code as i32 == GRPC_STATUS_UNIMPLEMENTED {
+            ReflectionAttemptOutcome::ErrorResponse { code: status.code as i32 }
+        } else {
+            ReflectionAttemptOutcome::ServiceUnavailable
+        };
+        return Err(AttemptFailure {
+            outcome,
+            err: AppError::Other(format!(
+                "gRPC reflection ({version:?}) list_services returned no response (grpc-status {}{})",
+                status.code,
+                status.message.map(|m| format!(": {m}")).unwrap_or_default(),
+            )),
+        });
+    };
+
+    match decode_response(version, &bytes).map_err(unavailable)? {
+        ReflectionResponse::ListServices(services) => Ok((stream, services)),
+        ReflectionResponse::Error(e) => Err(AttemptFailure {
+            outcome: ReflectionAttemptOutcome::ErrorResponse { code: e.code },
+            err: AppError::Other(format!(
+                "gRPC reflection list_services error {}: {}",
+                e.code, e.message
+            )),
+        }),
+        other => Err(unavailable(AppError::Other(format!(
+            "unexpected reflection response shape for list_services: {other:?}"
+        )))),
+    }
+}
+
+/// Opens a reflection session on `transport`: tries `v1`'s `list_services`
+/// first, falling back to `v1alpha` exactly once per
+/// [`should_retry_on_v1alpha`] if `v1` isn't supported. Returns the
+/// still-open stream (ready to receive further `file_containing_symbol`
+/// requests/responses on the same version and connection) plus the
+/// discovered service names.
+async fn open_reflection_session(
+    transport: &mut super::transport::GrpcTransport,
+    host: &str,
+) -> AppResult<(super::transport::GrpcStream, ReflectionVersion, Vec<ServiceInfo>)> {
+    match try_list_services(transport, host, ReflectionVersion::V1).await {
+        Ok((stream, services)) => Ok((stream, ReflectionVersion::V1, services)),
+        Err(first) => {
+            if !should_retry_on_v1alpha(first.outcome) {
+                return Err(first.err);
+            }
+            match try_list_services(transport, host, ReflectionVersion::V1Alpha).await {
+                Ok((stream, services)) => Ok((stream, ReflectionVersion::V1Alpha, services)),
+                Err(second) => Err(second.err),
+            }
+        }
+    }
+}
+
+/// Live-drives the bidi-streaming `ServerReflectionInfo` RPC over an
+/// already-connected `GrpcTransport` to discover a server's registered
+/// services/methods: `list_services` first (with the `v1`/`v1alpha`
+/// fallback described above), then `file_containing_symbol` for each
+/// discovered service in turn (skipping the reflection service's own
+/// meta-service) to pull the `FileDescriptorProto`s needed to build a
+/// `DescriptorPool`. All requests/responses for the chosen version ride one
+/// bidi stream — a real reflection client is expected to reuse one stream
+/// for a whole discovery session, not open one per request.
+pub(crate) async fn discover_schema(
+    transport: &mut super::transport::GrpcTransport,
+    host: &str,
+) -> AppResult<DiscoveredSchema> {
+    let (mut stream, version, services) = open_reflection_session(transport, host).await?;
+
+    let meta_service = format!("{}.ServerReflection", version.package());
+    let queryable: Vec<String> = services
+        .into_iter()
+        .map(|s| s.name)
+        .filter(|name| *name != meta_service)
+        .collect();
+
+    let mut file_descriptor_bytes: Vec<Vec<u8>> = Vec::new();
+    for name in &queryable {
+        let request = build_file_containing_symbol_request(version, host, name)?;
+        stream.send_frame(&request.encode_to_vec(), false)?;
+        let bytes = stream.recv_frame().await?.ok_or_else(|| {
+            AppError::Other(format!(
+                "gRPC reflection server closed the stream before answering file_containing_symbol(\"{name}\")"
+            ))
+        })?;
+        match decode_response(version, &bytes)? {
+            ReflectionResponse::FileDescriptors(files) => file_descriptor_bytes.extend(files),
+            ReflectionResponse::Error(e) => {
+                return Err(AppError::Other(format!(
+                    "gRPC reflection error resolving \"{name}\": {} ({})",
+                    e.message, e.code
+                )));
+            }
+            other => {
+                return Err(AppError::Other(format!(
+                    "unexpected reflection response shape for file_containing_symbol(\"{name}\"): {other:?}"
+                )));
+            }
+        }
+    }
+    stream.half_close()?;
+
+    // Dedup by filename before assembling the `FileDescriptorSet` — several
+    // services can share transitive dependencies, and each response is
+    // expected to include them, so the same file can arrive more than once.
+    // Kept in first-seen order across all responses (not re-sorted), which
+    // preserves a real server's own dependency ordering since a valid
+    // response only ever lists a file after its own dependencies.
+    let mut seen = std::collections::HashSet::new();
+    let mut files = Vec::new();
+    for bytes in file_descriptor_bytes {
+        let fdp = FileDescriptorProto::decode(bytes.as_slice())
+            .map_err(|e| AppError::Other(format!("failed to decode FileDescriptorProto: {e}")))?;
+        if seen.insert(fdp.name.clone().unwrap_or_default()) {
+            files.push(fdp);
+        }
+    }
+    let fds = prost_types::FileDescriptorSet { file: files };
+    let file_descriptor_set = fds.encode_to_vec();
+    let pool = DescriptorPool::from_file_descriptor_set(fds).map_err(|e| {
+        AppError::Other(format!(
+            "reflection-discovered file descriptors produced an invalid descriptor pool: {e}"
+        ))
+    })?;
+
+    let queryable_set: std::collections::HashSet<&str> = queryable.iter().map(String::as_str).collect();
+    let services = discovered_services_from_pool(&pool, |name| queryable_set.contains(name));
+
+    Ok(DiscoveredSchema {
+        services,
+        file_descriptor_set,
     })
 }
 
@@ -1166,5 +1486,365 @@ mod tests {
         let err = descriptor_pool_from_file_descriptors(&[vec![0xFF, 0xFF, 0xFF]])
             .expect_err("garbage bytes should fail to decode as a FileDescriptorProto, not panic");
         assert!(err.to_string().contains("FileDescriptorProto"));
+    }
+
+    // --- Live schema discovery (loopback h2, no TLS needed — see
+    // `transport.rs`'s own tests for the TLS-stack proof; discovery only
+    // needs to prove the reflection RPC-driving logic itself) ------------
+
+    mod discover_schema_tests {
+        use crate::engine::grpc::transport::GrpcTransport;
+        use super::*;
+        use bytes::Bytes;
+        use http::HeaderMap;
+        use std::collections::{BTreeMap, VecDeque};
+        use tokio::net::TcpListener;
+
+        const COMMON_PROTO: &str = r#"
+            syntax = "proto3";
+            package reflectiontest;
+            message Amount { int32 value = 1; }
+        "#;
+        const MAIN_PROTO: &str = r#"
+            syntax = "proto3";
+            package reflectiontest;
+            import "common.proto";
+            service Calc {
+              rpc Double(Amount) returns (Amount);
+            }
+        "#;
+
+        /// The schema a fake target server "has" — compiled the same way
+        /// `schema::compile_proto_set`'s own tests do. Two files with a real
+        /// `import` so the dependency-ordering behavior of
+        /// `discover_schema`'s dedup/assembly step is actually exercised,
+        /// not just a single self-contained file.
+        fn target_pool() -> DescriptorPool {
+            let mut files: BTreeMap<String, String> = BTreeMap::new();
+            files.insert("common.proto".to_string(), COMMON_PROTO.to_string());
+            files.insert("main.proto".to_string(), MAIN_PROTO.to_string());
+            compile_proto_set(&files, &["main.proto".to_string()]).expect("target schema should compile")
+        }
+
+        fn v1_pool() -> DescriptorPool {
+            reflection_descriptor_pool(ReflectionVersion::V1).expect("v1 schema should compile")
+        }
+
+        fn build_list_services_response(pool: &DescriptorPool, names: &[&str]) -> DynamicMessage {
+            let resp_desc = pool
+                .get_message_by_name("grpc.reflection.v1.ServerReflectionResponse")
+                .expect("ServerReflectionResponse");
+            let list_resp_desc = pool
+                .get_message_by_name("grpc.reflection.v1.ListServiceResponse")
+                .expect("ListServiceResponse");
+            let service_desc = pool
+                .get_message_by_name("grpc.reflection.v1.ServiceResponse")
+                .expect("ServiceResponse");
+            let services: Vec<Value> = names
+                .iter()
+                .map(|n| {
+                    let mut m = DynamicMessage::new(service_desc.clone());
+                    m.set_field_by_name("name", Value::String(n.to_string()));
+                    Value::Message(m)
+                })
+                .collect();
+            let mut list_resp = DynamicMessage::new(list_resp_desc);
+            list_resp.set_field_by_name("service", Value::List(services));
+            let mut resp = DynamicMessage::new(resp_desc);
+            resp.set_field_by_name("list_services_response", Value::Message(list_resp));
+            resp
+        }
+
+        fn build_file_descriptor_response(pool: &DescriptorPool, fdps: &[Vec<u8>]) -> DynamicMessage {
+            let resp_desc = pool
+                .get_message_by_name("grpc.reflection.v1.ServerReflectionResponse")
+                .expect("ServerReflectionResponse");
+            let fdr_desc = pool
+                .get_message_by_name("grpc.reflection.v1.FileDescriptorResponse")
+                .expect("FileDescriptorResponse");
+            let mut fdr = DynamicMessage::new(fdr_desc);
+            let values: Vec<Value> = fdps.iter().map(|b| Value::Bytes(Bytes::from(b.clone()))).collect();
+            fdr.set_field_by_name("file_descriptor_proto", Value::List(values));
+            let mut resp = DynamicMessage::new(resp_desc);
+            resp.set_field_by_name("file_descriptor_response", Value::Message(fdr));
+            resp
+        }
+
+        /// Reads request frames off a server-side request body one at a
+        /// time, buffering any extras `FrameUnframer` extracts from a single
+        /// HTTP/2 DATA chunk (gRPC frames don't align to DATA frame
+        /// boundaries) — mirrors the client-side `GrpcStream::recv_frame`
+        /// this test is standing in for the server half of.
+        async fn read_one_request(
+            body: &mut h2::RecvStream,
+            unframer: &mut crate::engine::grpc::framing::FrameUnframer,
+            queue: &mut VecDeque<Vec<u8>>,
+        ) -> Vec<u8> {
+            loop {
+                if let Some(p) = queue.pop_front() {
+                    return p;
+                }
+                let chunk = body
+                    .data()
+                    .await
+                    .expect("client should send another request")
+                    .expect("body read ok");
+                let len = chunk.len();
+                queue.extend(unframer.feed(&chunk));
+                let _ = body.flow_control().release_capacity(len);
+            }
+        }
+
+        /// Full happy-path proof: `list_services` discovers one service,
+        /// `file_containing_symbol` pulls back both the importing file and
+        /// its dependency, and the assembled `DescriptorPool` genuinely
+        /// resolves the method — not just "no error". The two-file `import`
+        /// schema means a wrong dependency order in the assembled
+        /// `FileDescriptorSet` would make `from_file_descriptor_set` reject
+        /// it outright, so this also proves `discover_schema`'s dedup/order
+        /// handling, not just that discovery completes.
+        #[tokio::test(flavor = "current_thread")]
+        async fn walks_list_services_then_file_containing_symbol_and_builds_a_working_pool() {
+            let target = target_pool();
+            let common_bytes = target
+                .get_file_by_name("common.proto")
+                .expect("common.proto in target pool")
+                .file_descriptor_proto()
+                .encode_to_vec();
+            let main_bytes = target
+                .get_file_by_name("main.proto")
+                .expect("main.proto in target pool")
+                .file_descriptor_proto()
+                .encode_to_vec();
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let addr = listener.local_addr().expect("local_addr");
+
+            let server = tokio::spawn(async move {
+                let (sock, _) = listener.accept().await.expect("accept");
+                let mut conn = h2::server::handshake(sock).await.expect("h2 handshake");
+                let (request, mut respond) = conn
+                    .accept()
+                    .await
+                    .expect("server should see an incoming stream")
+                    .expect("server accept should not error");
+                tokio::spawn(async move { while conn.accept().await.is_some() {} });
+
+                assert_eq!(
+                    request.uri().path(),
+                    "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo"
+                );
+                let response = http::Response::builder().status(200).body(()).expect("response head");
+                let mut send_stream = respond.send_response(response, false).expect("send_response");
+
+                let pool = v1_pool();
+                let req_desc = pool
+                    .get_message_by_name("grpc.reflection.v1.ServerReflectionRequest")
+                    .expect("ServerReflectionRequest");
+                let mut body = request.into_body();
+                let mut unframer = crate::engine::grpc::framing::FrameUnframer::default();
+                let mut queue = VecDeque::new();
+
+                let payload1 = read_one_request(&mut body, &mut unframer, &mut queue).await;
+                let msg1 = DynamicMessage::decode(req_desc.clone(), payload1.as_slice())
+                    .expect("decode list_services request");
+                assert!(msg1.has_field_by_name("list_services"));
+                let resp1 = build_list_services_response(&pool, &["reflectiontest.Calc"]);
+                send_stream
+                    .send_data(Bytes::from(crate::engine::grpc::framing::frame(&resp1.encode_to_vec())), false)
+                    .expect("send list_services response");
+
+                let payload2 = read_one_request(&mut body, &mut unframer, &mut queue).await;
+                let msg2 = DynamicMessage::decode(req_desc.clone(), payload2.as_slice())
+                    .expect("decode file_containing_symbol request");
+                let symbol = msg2
+                    .get_field_by_name("file_containing_symbol")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .expect("file_containing_symbol field");
+                assert_eq!(symbol, "reflectiontest.Calc");
+                // Transitive-dependency order, as the proto's own comments
+                // describe the response carrying: the dependency
+                // (common.proto) before the file that imports it.
+                let resp2 =
+                    build_file_descriptor_response(&pool, &[common_bytes.clone(), main_bytes.clone()]);
+                send_stream
+                    .send_data(Bytes::from(crate::engine::grpc::framing::frame(&resp2.encode_to_vec())), false)
+                    .expect("send file_containing_symbol response");
+
+                // Drain the client's half-close, then close out with a
+                // normal OK status.
+                while body.data().await.is_some() {}
+                let mut trailers = HeaderMap::new();
+                trailers.insert("grpc-status", "0".parse().unwrap());
+                send_stream.send_trailers(trailers).expect("send_trailers");
+            });
+
+            let mut transport = GrpcTransport::connect(&format!("grpc://{addr}"), None)
+                .await
+                .expect("plaintext loopback connect");
+            let discovered = discover_schema(&mut transport, "")
+                .await
+                .expect("discover_schema should succeed");
+
+            assert_eq!(discovered.services.len(), 1);
+            let service = &discovered.services[0];
+            assert_eq!(service.name, "reflectiontest.Calc");
+            assert_eq!(service.methods.len(), 1);
+            let method = &service.methods[0];
+            assert_eq!(method.full_name, "reflectiontest.Calc/Double");
+            assert_eq!(method.streaming, GrpcStreamingKind::Unary);
+            assert_eq!(method.input_fields.len(), 1);
+            assert_eq!(method.input_fields[0].name, "value");
+            assert_eq!(method.input_fields[0].type_name, "int32");
+            assert!(!method.input_fields[0].repeated);
+
+            let rebuilt = descriptor_pool_from_file_descriptor_set_bytes(&discovered.file_descriptor_set)
+                .expect("rebuilding a pool from the discovered descriptor set should succeed");
+            let rebuilt_method = rebuilt
+                .get_service_by_name("reflectiontest.Calc")
+                .and_then(|s| s.methods().find(|m| m.name() == "Double"))
+                .expect("Double method should resolve in the rebuilt pool");
+            assert_eq!(rebuilt_method.input().full_name(), "reflectiontest.Amount");
+
+            server.await.expect("server task did not finish cleanly");
+        }
+
+        /// Proves the live `v1` → `v1alpha` fallback: the server answers the
+        /// first (`v1`) stream Trailers-Only `UNIMPLEMENTED`, so
+        /// `discover_schema` must open a *second* stream at the `v1alpha`
+        /// service path on the same connection and complete discovery
+        /// there — not just that the pure `should_retry_on_v1alpha`
+        /// decision function returns `true` in isolation.
+        #[tokio::test(flavor = "current_thread")]
+        async fn falls_back_to_v1alpha_when_v1_is_unimplemented() {
+            let target = target_pool();
+            let common_bytes = target
+                .get_file_by_name("common.proto")
+                .expect("common.proto in target pool")
+                .file_descriptor_proto()
+                .encode_to_vec();
+            let main_bytes = target
+                .get_file_by_name("main.proto")
+                .expect("main.proto in target pool")
+                .file_descriptor_proto()
+                .encode_to_vec();
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let addr = listener.local_addr().expect("local_addr");
+
+            let server = tokio::spawn(async move {
+                let (sock, _) = listener.accept().await.expect("accept");
+                let mut conn = h2::server::handshake(sock).await.expect("h2 handshake");
+
+                // Stream 1: v1 — Trailers-Only UNIMPLEMENTED (no v1 support).
+                let (request1, mut respond1) = conn
+                    .accept()
+                    .await
+                    .expect("server should see the v1 stream")
+                    .expect("v1 accept should not error");
+                assert_eq!(
+                    request1.uri().path(),
+                    "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo"
+                );
+                let response1 = http::Response::builder()
+                    .status(200)
+                    .header("grpc-status", "12")
+                    .body(())
+                    .expect("v1 response head");
+                respond1
+                    .send_response(response1, true)
+                    .expect("v1 send_response (end_of_stream)");
+
+                // Stream 2: v1alpha — the real discovery flow.
+                let (request2, mut respond2) = conn
+                    .accept()
+                    .await
+                    .expect("server should see the v1alpha stream")
+                    .expect("v1alpha accept should not error");
+                tokio::spawn(async move { while conn.accept().await.is_some() {} });
+                assert_eq!(
+                    request2.uri().path(),
+                    "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo"
+                );
+                let response2 = http::Response::builder().status(200).body(()).expect("response head");
+                let mut send_stream = respond2.send_response(response2, false).expect("send_response");
+
+                let pool = reflection_descriptor_pool(ReflectionVersion::V1Alpha)
+                    .expect("v1alpha schema should compile");
+                let req_desc = pool
+                    .get_message_by_name("grpc.reflection.v1alpha.ServerReflectionRequest")
+                    .expect("ServerReflectionRequest");
+                let resp_desc = pool
+                    .get_message_by_name("grpc.reflection.v1alpha.ServerReflectionResponse")
+                    .expect("ServerReflectionResponse");
+                let list_resp_desc = pool
+                    .get_message_by_name("grpc.reflection.v1alpha.ListServiceResponse")
+                    .expect("ListServiceResponse");
+                let service_desc = pool
+                    .get_message_by_name("grpc.reflection.v1alpha.ServiceResponse")
+                    .expect("ServiceResponse");
+                let fdr_desc = pool
+                    .get_message_by_name("grpc.reflection.v1alpha.FileDescriptorResponse")
+                    .expect("FileDescriptorResponse");
+
+                let mut body = request2.into_body();
+                let mut unframer = crate::engine::grpc::framing::FrameUnframer::default();
+                let mut queue = VecDeque::new();
+
+                let payload1 = read_one_request(&mut body, &mut unframer, &mut queue).await;
+                let msg1 = DynamicMessage::decode(req_desc.clone(), payload1.as_slice())
+                    .expect("decode list_services request");
+                assert!(msg1.has_field_by_name("list_services"));
+                let mut service_name = DynamicMessage::new(service_desc);
+                service_name.set_field_by_name("name", Value::String("reflectiontest.Calc".to_string()));
+                let mut list_resp = DynamicMessage::new(list_resp_desc);
+                list_resp.set_field_by_name("service", Value::List(vec![Value::Message(service_name)]));
+                let mut resp1 = DynamicMessage::new(resp_desc.clone());
+                resp1.set_field_by_name("list_services_response", Value::Message(list_resp));
+                send_stream
+                    .send_data(Bytes::from(crate::engine::grpc::framing::frame(&resp1.encode_to_vec())), false)
+                    .expect("send list_services response");
+
+                let payload2 = read_one_request(&mut body, &mut unframer, &mut queue).await;
+                let msg2 = DynamicMessage::decode(req_desc, payload2.as_slice())
+                    .expect("decode file_containing_symbol request");
+                assert_eq!(
+                    msg2.get_field_by_name("file_containing_symbol")
+                        .and_then(|v| v.as_str().map(|s| s.to_string())),
+                    Some("reflectiontest.Calc".to_string())
+                );
+                let mut fdr = DynamicMessage::new(fdr_desc);
+                fdr.set_field_by_name(
+                    "file_descriptor_proto",
+                    Value::List(vec![
+                        Value::Bytes(Bytes::from(common_bytes.clone())),
+                        Value::Bytes(Bytes::from(main_bytes.clone())),
+                    ]),
+                );
+                let mut resp2 = DynamicMessage::new(resp_desc);
+                resp2.set_field_by_name("file_descriptor_response", Value::Message(fdr));
+                send_stream
+                    .send_data(Bytes::from(crate::engine::grpc::framing::frame(&resp2.encode_to_vec())), false)
+                    .expect("send file_containing_symbol response");
+
+                while body.data().await.is_some() {}
+                let mut trailers = HeaderMap::new();
+                trailers.insert("grpc-status", "0".parse().unwrap());
+                send_stream.send_trailers(trailers).expect("send_trailers");
+            });
+
+            let mut transport = GrpcTransport::connect(&format!("grpc://{addr}"), None)
+                .await
+                .expect("plaintext loopback connect");
+            let discovered = discover_schema(&mut transport, "")
+                .await
+                .expect("discover_schema should fall back to v1alpha and succeed");
+
+            assert_eq!(discovered.services.len(), 1);
+            assert_eq!(discovered.services[0].name, "reflectiontest.Calc");
+            assert_eq!(discovered.services[0].methods[0].full_name, "reflectiontest.Calc/Double");
+
+            server.await.expect("server task did not finish cleanly");
+        }
     }
 }

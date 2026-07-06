@@ -38,8 +38,12 @@
 //! rather than connecting with garbage.
 
 import { useState } from "react";
-import { Network } from "lucide-react";
+import { Network, Save } from "lucide-react";
 import { protocolOf } from "../../lib/methods";
+import { defaultRequest } from "../../lib/http";
+import { defaultRequestAuth, type GrpcStreamConfig, type SavedRequest } from "../../lib/types";
+import { useCollections, useCreateRequest, useUpdateRequest } from "../collections/hooks";
+import { SaveRequestDialog } from "../request/SaveRequestDialog";
 import { GrpcSchemaPicker } from "./GrpcSchemaPicker";
 import { GrpcMessageBuilder } from "./GrpcMessageBuilder";
 import type { GrpcMethodDescriptor } from "./grpcSchemaTypes";
@@ -47,16 +51,35 @@ import { useGrpcConnection, type GrpcLogEntry, type GrpcStatus } from "./grpcHoo
 
 const DEFAULT_ENTRY_POINT = "main.proto";
 
-export function GrpcPanel({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
-  const [url, setUrl] = useState("");
+function grpcConfigOf(request: SavedRequest | null | undefined): GrpcStreamConfig | null {
+  if (!request || request.kind !== "grpc" || !request.streamConfig) return null;
+  return request.streamConfig as GrpcStreamConfig;
+}
+
+export function GrpcPanel({
+  workspaceId,
+  savedRequest,
+  onClose,
+}: {
+  workspaceId: string;
+  savedRequest?: SavedRequest | null;
+  onClose: () => void;
+}) {
+  const initial = grpcConfigOf(savedRequest);
+  const [url, setUrl] = useState(initial?.url ?? "");
   const [method, setMethod] = useState<GrpcMethodDescriptor | null>(null);
   // Panel-owned proto source — see the module doc comment above for why this
   // can't come from the picker. Free-form text + an optional filename used
   // as the descriptor pool's entry point key.
-  const [protoSource, setProtoSource] = useState("");
-  const [protoFileName, setProtoFileName] = useState("");
+  const [protoSource, setProtoSource] = useState(initial?.protoSource ?? "");
+  const [protoFileName, setProtoFileName] = useState(initial?.protoFileName ?? "");
   const [buildError, setBuildError] = useState<string | null>(null);
+  const [linkedRequest, setLinkedRequest] = useState<SavedRequest | null>(savedRequest ?? null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const { status, log, errorMessage, connect, disconnect, send, finishSending } = useGrpcConnection();
+  const { data: collections } = useCollections(workspaceId);
+  const createRequest = useCreateRequest(workspaceId);
+  const updateRequest = useUpdateRequest(workspaceId);
 
   // `grpc_connect` only accepts `grpc://`/`grpcs://` (see `parse_target` in
   // `engine::grpc::transport`) — unlike SSE/WS, plain http(s) is never a
@@ -126,6 +149,49 @@ export function GrpcPanel({ workspaceId, onClose }: { workspaceId: string; onClo
     disconnect();
   }
 
+  function streamConfig(): GrpcStreamConfig {
+    return { url, methodFullName: method?.fullName ?? null, protoSource, protoFileName };
+  }
+
+  async function handleSave(name: string, collectionId: string) {
+    const saved = await createRequest.mutateAsync({
+      collectionId,
+      input: {
+        name,
+        ...defaultRequest(),
+        method: "GRPC",
+        auth: defaultRequestAuth(),
+        preRequestScript: "",
+        postResponseScript: "",
+        kind: "grpc",
+        streamConfig: streamConfig(),
+      },
+    });
+    setLinkedRequest(saved);
+    setSaveDialogOpen(false);
+  }
+
+  function handleUpdate() {
+    if (!linkedRequest) return;
+    updateRequest.mutate({
+      id: linkedRequest.id,
+      input: {
+        name: linkedRequest.name,
+        method: linkedRequest.method,
+        url: linkedRequest.url,
+        headers: linkedRequest.headers,
+        query: linkedRequest.query,
+        body: linkedRequest.body,
+        options: linkedRequest.options,
+        auth: linkedRequest.auth,
+        preRequestScript: linkedRequest.preRequestScript,
+        postResponseScript: linkedRequest.postResponseScript,
+        kind: "grpc",
+        streamConfig: streamConfig(),
+      },
+    });
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
       <div
@@ -134,9 +200,19 @@ export function GrpcPanel({ workspaceId, onClose }: { workspaceId: string; onClo
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            <Network size={14} /> gRPC
+            <Network size={14} /> gRPC{linkedRequest && ` — ${linkedRequest.name}`}
           </h2>
-          <StatusBadge status={status} />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              title={linkedRequest ? "Save changes to this saved request" : "Save to a collection"}
+              onClick={() => (linkedRequest ? handleUpdate() : setSaveDialogOpen(true))}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
+            >
+              <Save size={12} /> Save
+            </button>
+            <StatusBadge status={status} />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -252,6 +328,18 @@ export function GrpcPanel({ workspaceId, onClose }: { workspaceId: string; onClo
           </button>
         </div>
       </div>
+
+      {saveDialogOpen && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <SaveRequestDialog
+            defaultName="gRPC request"
+            collections={collections ?? []}
+            saving={createRequest.isPending}
+            onSave={(name, collectionId) => void handleSave(name, collectionId)}
+            onClose={() => setSaveDialogOpen(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }

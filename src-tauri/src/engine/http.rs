@@ -1,27 +1,158 @@
 //! HTTP engine: turns an `HttpRequest` spec into a reqwest call and captures
 //! the response plus timing.
 //!
-//! Timing note: this first cut measures total / TTFB / download from the
-//! client side. Per-phase DNS/TCP/TLS timing needs an instrumented connector
-//! (reqwest exposes only total) and is a tracked Phase-1 follow-up; those
-//! `Timing` fields stay `None` until then.
+//! Timing note: `total`/`ttfb`/`download` are measured directly around the
+//! `send()`/`bytes()` calls. `dns`/`connect` are measured via two of
+//! reqwest's public instrumentation hooks — `ClientBuilder::dns_resolver`
+//! (see `TimingResolver`) and `ClientBuilder::connector_layer` (see
+//! `TimingLayer`) — installed only on the one-shot `Client` `send()` builds
+//! per request (see `build_timed_client`); `build_client`/`build_ws_client`
+//! (used by SSE/WS, which don't report per-phase timing) skip them entirely.
+//! `connector_layer`'s hook wraps the *whole* connect step reqwest performs
+//! internally — for `https://` targets that's DNS resolution, TCP connect,
+//! *and* the TLS handshake all nested inside one span, with no public seam
+//! to split TCP from TLS — so `attribute_connect_ms` subtracts the
+//! separately-measured `dns_ms` back out (the resolver call happens inside
+//! the connector's span, not before it) and the result holds TCP connect +
+//! TLS combined; `tls_ms` stays `None` rather than faking a further split.
+//!
+//! Waterfall convention, spelled out because the frontend's `TimingView`
+//! renders these as if they were sequential non-overlapping bars (they are
+//! not): `dns_ms`/`connect_ms` are each that phase's own duration (mutually
+//! exclusive of each other, see `attribute_connect_ms`), but `ttfb_ms` is
+//! measured from *before* the connection is even opened (`start` is set
+//! right before `builder.send().await`, which performs DNS+connect+TLS+the
+//! request write before the first response byte arrives) — so `ttfb_ms`
+//! already *contains* `dns_ms`+`connect_ms`, it doesn't follow them. Only
+//! `ttfb_ms + download_ms == total_ms` is a true additive identity; the
+//! individual dns/connect/ttfb rows don't sum to `total_ms`. This matches
+//! curl's `-w` cumulative timing vars more than Chrome DevTools' strictly
+//! non-overlapping waterfall — revisit if the frontend wants the latter
+//! (which would mean re-deriving a request-send-to-ttfb-only figure).
 
 use crate::error::{AppError, AppResult};
 use crate::model::auth::{ApiKeyLocation, AuthConfig};
 use crate::model::http::*;
 use base64::Engine as _;
+use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, Method, RequestBuilder, Url};
 use reqwest_cookie_store::CookieStoreMutex;
-use std::sync::Arc;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
+use tower::{Layer, Service};
+
+/// Where `TimingResolver`/`TimingLayer` (installed only by
+/// `build_timed_client`) deposit their measurements for `send()` to read
+/// back once the response has arrived. One sink per request — a fresh
+/// `Client` is built for every `send()` call (see `build_client_inner`), so
+/// there's no cross-request state to worry about.
+#[derive(Default)]
+struct PhaseTimingSink {
+    dns_ms: Mutex<Option<f64>>,
+    connect_ms: Mutex<Option<f64>>,
+}
+
+/// Wraps DNS resolution to time it. Delegates to `tokio::net::lookup_host`
+/// (the same getaddrinfo-backed resolution hyper's own default resolver
+/// uses) rather than special resolver logic — this hook exists purely to
+/// time the lookup, not to change how it resolves. Naturally never invoked
+/// (and `dns_ms` naturally stays `None`) when the host is already an IP
+/// literal, since reqwest's connector skips resolution in that case.
+struct TimingResolver {
+    sink: Arc<PhaseTimingSink>,
+}
+
+impl Resolve for TimingResolver {
+    fn resolve(&self, name: Name) -> Resolving {
+        let sink = self.sink.clone();
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let start = Instant::now();
+            let addrs = tokio::net::lookup_host((host, 0))
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            *sink.dns_ms.lock().unwrap() = Some(ms(start.elapsed()));
+            let iter: Addrs = Box::new(addrs);
+            Ok(iter)
+        })
+    }
+}
+
+/// A `tower::Layer` generic over the wrapped service — mirrors how
+/// `tower::timeout::TimeoutLayer` etc. are usable with `ClientBuilder::connector_layer`
+/// in reqwest's own docs, despite that method's bound naming reqwest-private
+/// types (`BoxedConnectorService`/`Unnameable`/`Conn`): a generic-over-`S`
+/// `Layer`/`Service` impl never has to name them — reqwest monomorphizes
+/// with its own private concrete types internally.
+#[derive(Clone)]
+struct TimingLayer {
+    sink: Arc<PhaseTimingSink>,
+}
+
+impl<S> Layer<S> for TimingLayer {
+    type Service = TimingService<S>;
+    fn layer(&self, inner: S) -> Self::Service {
+        TimingService { inner, sink: self.sink.clone() }
+    }
+}
+
+#[derive(Clone)]
+struct TimingService<S> {
+    inner: S,
+    sink: Arc<PhaseTimingSink>,
+}
+
+impl<S, Req> Service<Req> for TimingService<S>
+where
+    S: Service<Req> + Send,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<S::Response, S::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Req) -> Self::Future {
+        let start = Instant::now();
+        let fut = self.inner.call(req);
+        let sink = self.sink.clone();
+        Box::pin(async move {
+            let result = fut.await;
+            *sink.connect_ms.lock().unwrap() = Some(ms(start.elapsed()));
+            result
+        })
+    }
+}
+
+/// `TimingLayer` wraps the *whole* connector — which itself calls the
+/// resolver internally before dialing — so its raw span strictly *contains*
+/// whatever `TimingResolver` measured, not sits after it. Reporting both
+/// numbers as-is would double-count DNS time on the connect row (e.g. "DNS
+/// 5ms / connect 15ms" when the real TCP+TLS work was only 10ms). Subtracting
+/// gives a connect figure that means "TCP connect + TLS handshake, DNS
+/// excluded" — consistent with `tls_ms` staying `None` rather than a
+/// fabricated split. `dns_ms <= raw_connect_ms` always holds since one span
+/// contains the other; `.max(0.0)` is defensive, not expected to trigger.
+fn attribute_connect_ms(dns_ms: Option<f64>, raw_connect_ms: Option<f64>) -> Option<f64> {
+    raw_connect_ms.map(|raw| match dns_ms {
+        Some(dns) => (raw - dns).max(0.0),
+        None => raw,
+    })
+}
 
 pub async fn send(
     req: HttpRequest,
     cookie_jar: Option<Arc<CookieStoreMutex>>,
     transport: Option<&TransportOverrides>,
 ) -> AppResult<HttpResponse> {
-    let client = build_client(&req.options, cookie_jar, transport)?;
+    let (client, timing_sink) = build_timed_client(&req.options, cookie_jar, transport)?;
 
     let method = Method::from_bytes(req.method.trim().as_bytes())
         .map_err(|_| AppError::Other(format!("invalid HTTP method: {}", req.method)))?;
@@ -72,6 +203,9 @@ pub async fn send(
     let bytes = resp.bytes().await?;
     let total = start.elapsed();
 
+    let dns_ms = *timing_sink.dns_ms.lock().unwrap();
+    let connect_ms = attribute_connect_ms(dns_ms, *timing_sink.connect_ms.lock().unwrap());
+
     Ok(HttpResponse {
         status: status.as_u16(),
         status_text,
@@ -80,8 +214,8 @@ pub async fn send(
         body_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
         timing: Timing {
             total_ms: ms(total),
-            dns_ms: None,
-            connect_ms: None,
+            dns_ms,
+            connect_ms,
             tls_ms: None,
             ttfb_ms: Some(ms(ttfb)),
             download_ms: Some(ms(total.saturating_sub(ttfb))),
@@ -96,7 +230,20 @@ pub(crate) fn build_client(
     cookie_jar: Option<Arc<CookieStoreMutex>>,
     transport: Option<&TransportOverrides>,
 ) -> AppResult<Client> {
-    build_client_inner(opts, cookie_jar, transport, false)
+    build_client_inner(opts, cookie_jar, transport, false, None)
+}
+
+/// Same as `build_client`, but also installs `TimingResolver`/`TimingLayer`
+/// and hands back the sink they write into — used only by `send()`, which is
+/// the only caller that reports per-phase timing back to the frontend.
+fn build_timed_client(
+    opts: &RequestOptions,
+    cookie_jar: Option<Arc<CookieStoreMutex>>,
+    transport: Option<&TransportOverrides>,
+) -> AppResult<(Client, Arc<PhaseTimingSink>)> {
+    let sink = Arc::new(PhaseTimingSink::default());
+    let client = build_client_inner(opts, cookie_jar, transport, false, Some(sink.clone()))?;
+    Ok((client, sink))
 }
 
 /// Same as `build_client`, pinned to HTTP/1.1. The WebSocket handshake
@@ -108,7 +255,7 @@ pub(crate) fn build_ws_client(
     opts: &RequestOptions,
     transport: Option<&TransportOverrides>,
 ) -> AppResult<Client> {
-    build_client_inner(opts, None, transport, true)
+    build_client_inner(opts, None, transport, true, None)
 }
 
 fn build_client_inner(
@@ -116,6 +263,7 @@ fn build_client_inner(
     cookie_jar: Option<Arc<CookieStoreMutex>>,
     transport: Option<&TransportOverrides>,
     http1_only: bool,
+    timing: Option<Arc<PhaseTimingSink>>,
 ) -> AppResult<Client> {
     let redirect = if opts.follow_redirects {
         reqwest::redirect::Policy::limited(opts.max_redirects)
@@ -151,6 +299,11 @@ fn build_client_inner(
             builder = builder.identity(identity.clone());
         }
     }
+    if let Some(sink) = timing {
+        builder = builder
+            .dns_resolver(Arc::new(TimingResolver { sink: sink.clone() }))
+            .connector_layer(TimingLayer { sink });
+    }
     builder.build().map_err(Into::into)
 }
 
@@ -165,6 +318,18 @@ pub struct TransportOverrides {
     pub proxy_url: Option<String>,
     pub proxy_bypass: Option<String>,
     pub client_identity: Option<reqwest::Identity>,
+    /// Same client certificate as `client_identity`, kept as raw PEM
+    /// alongside the opaque `reqwest::Identity` so gRPC's hand-rolled rustls
+    /// client (which has no path to a `reqwest::Identity`) can build its own
+    /// `rustls::ClientConfig` from it. reqwest/ws/sse keep consuming
+    /// `client_identity` unchanged.
+    pub client_cert_pem: Option<ClientCertPem>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClientCertPem {
+    pub cert_pem: String,
+    pub key_pem: String,
 }
 
 fn build_url(raw: &str, query: &[KeyValue]) -> AppResult<Url> {
@@ -390,6 +555,41 @@ mod tests {
         assert!(build_url("not a url", &[]).is_err());
     }
 
+    // `attribute_connect_ms` is the fix for a real bug caught in review:
+    // `TimingLayer`'s raw span *contains* `TimingResolver`'s DNS span (the
+    // connector calls the resolver internally before dialing), so reporting
+    // both numbers unsubtracted would double-count DNS time on the connect
+    // row. These pin the containment-subtraction contract directly, since
+    // racing a real slow DNS lookup against a real TCP handshake in a test
+    // would be flaky and prove the same thing far less precisely.
+    #[test]
+    fn attribute_connect_ms_subtracts_dns_time_from_the_containing_connect_span() {
+        // Connector span was 20ms total; 5ms of that was the nested DNS
+        // lookup — the TCP+TLS-only portion is the remaining 15ms.
+        assert_eq!(attribute_connect_ms(Some(5.0), Some(20.0)), Some(15.0));
+    }
+
+    #[test]
+    fn attribute_connect_ms_passes_through_when_dns_was_not_measured() {
+        // IP-literal target: the resolver never ran, so there's nothing
+        // nested to subtract — the raw connect span is already TCP+TLS only.
+        assert_eq!(attribute_connect_ms(None, Some(20.0)), Some(20.0));
+    }
+
+    #[test]
+    fn attribute_connect_ms_stays_none_when_the_connector_layer_never_ran() {
+        // e.g. a pooled/reused connection — no connect span to attribute at all.
+        assert_eq!(attribute_connect_ms(Some(5.0), None), None);
+    }
+
+    #[test]
+    fn attribute_connect_ms_clamps_instead_of_going_negative() {
+        // Containment guarantees dns <= connect in practice, but the clamp
+        // means a clock-source anomaly reports 0ms rather than a negative
+        // duration, which would be a more confusing thing to render.
+        assert_eq!(attribute_connect_ms(Some(20.0), Some(5.0)), Some(0.0));
+    }
+
     #[test]
     fn file_name_of_extracts_basename() {
         assert_eq!(file_name_of("/a/b/c.png"), "c.png");
@@ -451,6 +651,53 @@ mod tests {
             .iter()
             .any(|h| h.name.eq_ignore_ascii_case("content-type")));
         assert!(resp.timing.ttfb_ms.is_some());
+        // Real TCP handshake against the loopback listener above — proves
+        // `TimingLayer` actually measures something, not just that it compiles.
+        assert!(resp.timing.connect_ms.is_some());
+        // `127.0.0.1` is an IP literal — reqwest's connector never calls the
+        // resolver for it, so `TimingResolver` never runs and `dns_ms` must
+        // stay `None` rather than reporting a fake zero.
+        assert!(resp.timing.dns_ms.is_none());
+    }
+
+    /// Same loopback server as `sends_over_socket_and_parses_response`, but
+    /// addressed by hostname so the connector actually calls `TimingResolver`
+    /// — proves `dns_ms` is populated on the one path where it's expected to be.
+    #[tokio::test]
+    async fn dns_ms_is_populated_when_the_host_is_a_name_not_an_ip_literal() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let body = b"ok";
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(head.as_bytes()).unwrap();
+            stream.write_all(body).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let req = HttpRequest {
+            method: "GET".into(),
+            url: format!("http://localhost:{port}/"),
+            headers: vec![],
+            query: vec![],
+            body: RequestBody::None,
+            options: RequestOptions::default(),
+            auth: AuthConfig::None,
+        };
+        let resp = send(req, None, None).await.unwrap();
+        server.join().unwrap();
+
+        assert_eq!(resp.status, 200);
+        assert!(resp.timing.dns_ms.is_some(), "expected a real DNS lookup for a hostname target");
+        assert!(resp.timing.connect_ms.is_some());
     }
 
     fn no_headers() -> Vec<(String, String)> {

@@ -142,6 +142,7 @@ fn parse_block(lines: &[String], vars: &HashMap<String, String>, warnings: &mut 
         auth: RequestAuth::Own(auth),
         pre_request_script: String::new(),
         post_response_script: String::new(),
+        ..Default::default()
     })
 }
 

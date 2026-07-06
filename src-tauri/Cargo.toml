@@ -27,6 +27,11 @@ rusqlite = { version = "0.40.1", features = ["bundled", "backup"] }
 thiserror = "2.0.18"
 uuid = { version = "1.23.3", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "brotli", "deflate", "zstd", "multipart", "stream", "cookies", "system-proxy", "rustls-tls-native-roots"] }
+# Already a transitive dep of reqwest (its `connector_layer`/`Layer`/`Service`
+# hooks are the public tower traits) — declared directly so `engine::http`'s
+# per-request timing instrumentation can name them. No new crate actually
+# gets pulled in; this just exposes what's already in the dependency graph.
+tower = { version = "0.5", default-features = false }
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
 base64 = "0.22.1"
 keyring = { version = "4.1.2", default-features = false, features = ["v1", "apple-native-keyring-store", "windows-native-keyring-store", "zbus-secret-service-keyring-store"] }

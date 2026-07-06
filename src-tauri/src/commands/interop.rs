@@ -32,6 +32,17 @@ pub fn preview_import(
     }
 }
 
+/// Import a whole Bruno collection directory (`bruno.json` + a folder tree of
+/// `.bru` files), as opposed to `preview_import`'s single pasted/uploaded
+/// file. `path` comes from the frontend's native directory picker
+/// (`tauri-plugin-dialog`'s `open({ directory: true })`, which only ever
+/// returns a path string) — the actual directory walk stays Rust-side per
+/// the IPC architecture contract, mirroring `commands::files::write_file_bytes`.
+#[tauri::command]
+pub fn preview_import_bruno_directory(path: String) -> AppResult<ImportPreview> {
+    interop::bruno::parse_directory(std::path::Path::new(&path))
+}
+
 /// Commit a previously-previewed tree under `parent_id` (`None` = workspace
 /// top level).
 #[tauri::command]

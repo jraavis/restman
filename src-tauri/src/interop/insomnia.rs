@@ -139,6 +139,7 @@ fn parse_request(r: &Value, warnings: &mut Vec<String>) -> ImportedRequest {
         auth,
         pre_request_script: r.get("preRequestScript").and_then(Value::as_str).unwrap_or_default().to_string(),
         post_response_script: r.get("afterResponseScript").and_then(Value::as_str).unwrap_or_default().to_string(),
+        ..Default::default()
     }
 }
 
