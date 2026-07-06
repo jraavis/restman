@@ -4349,7 +4349,7 @@ dependencies = [
 
 [[package]]
 name = "restman"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "aws-credential-types",
  "aws-sigv4",
