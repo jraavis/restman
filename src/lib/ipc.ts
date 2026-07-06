@@ -325,6 +325,11 @@ export const ipc = {
     invoke<Plugin>("create_plugin", { workspaceId, input }),
   updatePlugin: (id: string, input: PluginInput) => invoke<Plugin>("update_plugin", { id, input }),
   deletePlugin: (id: string) => invoke<void>("delete_plugin", { id }),
+  /** Config-only export (name/kind/label/source/enabled) — no secrets live
+   * in a plugin's JS source, unlike `exportEnvironment`, so no masking. */
+  exportPlugin: (id: string) => invoke<string>("export_plugin", { id }),
+  importPlugin: (workspaceId: string, content: string) =>
+    invoke<Plugin>("import_plugin", { workspaceId, content }),
   // "Test before saving" previews — run raw, unpersisted plugin source
   // through the same sandbox the saved-plugin dispatch path uses.
   previewPluginCodegen: (source: string, req: HttpRequest, options: CodegenOptions) =>

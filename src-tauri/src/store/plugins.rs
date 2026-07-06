@@ -137,6 +137,31 @@ pub fn delete(conn: &Connection, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Serializes a plugin's config to a pretty-printed JSON string for saving
+/// to disk and re-importing via `import` — `PluginInput` already carries
+/// every shareable field (name/kind/label/source/enabled), so no separate
+/// export shape is needed. No secrets live in a plugin's JS source, unlike
+/// environment/collection export, so this needs no masking.
+pub fn export(conn: &Connection, id: &str) -> AppResult<String> {
+    let plugin = get(conn, id)?;
+    let input = PluginInput {
+        name: plugin.name,
+        kind: plugin.kind,
+        language_label: plugin.language_label,
+        source: plugin.source,
+        enabled: plugin.enabled,
+    };
+    serde_json::to_string_pretty(&input).map_err(|e| AppError::Other(format!("failed to serialize plugin export: {e}")))
+}
+
+/// Creates a new plugin in `workspace_id` from a previously exported JSON
+/// string.
+pub fn import(conn: &Connection, workspace_id: &str, content: &str) -> AppResult<Plugin> {
+    let input: PluginInput =
+        serde_json::from_str(content).map_err(|e| AppError::Other(format!("invalid plugin export: {e}")))?;
+    create(conn, workspace_id, &input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +299,32 @@ mod tests {
         let plugins = list_by_workspace(&conn, &ws, None).unwrap();
         let names: Vec<&str> = plugins.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["Apple", "Mango", "Zebra"]);
+    }
+
+    #[test]
+    fn export_then_import_round_trips_into_another_workspace() {
+        let (conn, ws1) = mem_with_workspace();
+        let mut input = sample_input("Shared Codegen");
+        input.kind = PluginKind::Export;
+        input.enabled = false;
+        let created = create(&conn, &ws1, &input).unwrap();
+
+        let exported = export(&conn, &created.id).unwrap();
+
+        let ws2 = crate::store::workspaces::create(&conn, "Other").unwrap();
+        let imported = import(&conn, &ws2.id, &exported).unwrap();
+        assert_eq!(imported.workspace_id, ws2.id);
+        assert_eq!(imported.name, "Shared Codegen");
+        assert_eq!(imported.kind, PluginKind::Export);
+        assert_eq!(imported.language_label, created.language_label);
+        assert_eq!(imported.source, created.source);
+        assert!(!imported.enabled);
+        assert_ne!(imported.id, created.id);
+    }
+
+    #[test]
+    fn import_rejects_invalid_json() {
+        let (conn, ws) = mem_with_workspace();
+        assert!(matches!(import(&conn, &ws, "not json"), Err(AppError::Other(_))));
     }
 }

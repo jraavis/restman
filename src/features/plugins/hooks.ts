@@ -45,3 +45,15 @@ export function useDeletePlugin(workspaceId: string) {
     },
   });
 }
+
+export function useExportPlugin() {
+  return useMutation({ mutationFn: (id: string) => ipc.exportPlugin(id) });
+}
+
+export function useImportPlugin(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (content: string) => ipc.importPlugin(workspaceId, content),
+    onSuccess: () => qc.invalidateQueries({ queryKey: pluginKeys.all(workspaceId) }),
+  });
+}

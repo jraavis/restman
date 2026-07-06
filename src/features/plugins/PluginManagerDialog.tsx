@@ -3,12 +3,14 @@
 //! against a sample input before saving. Same modal shell as
 //! `WorkspaceSettingsDialog`/`CookieJarDialog`.
 
-import { useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { confirmDelete } from "../../lib/confirmDelete";
-import { Play, Plus, Trash2 } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { Download, Play, Plus, Trash2, Upload } from "lucide-react";
 import { LazyCodeEditor } from "../../components/LazyCodeEditor";
 import { defaultRequest } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
+import { textToBase64 } from "../../lib/encoding";
 import {
   defaultCodegenOptions,
   defaultRequestAuth,
@@ -18,7 +20,7 @@ import {
   type PluginInput,
   type PluginKind,
 } from "../../lib/types";
-import { useCreatePlugin, useDeletePlugin, usePlugins, useUpdatePlugin } from "./hooks";
+import { useCreatePlugin, useDeletePlugin, useExportPlugin, useImportPlugin, usePlugins, useUpdatePlugin } from "./hooks";
 
 const KIND_LABELS: Record<PluginKind, string> = {
   codegen: "Codegen",
@@ -63,10 +65,27 @@ export function PluginManagerDialog({ workspaceId, onClose }: { workspaceId: str
   const [selectedId, setSelectedId] = useState<string | "new" | null>(null);
 
   const selected = selectedId && selectedId !== "new" ? plugins?.find((p) => p.id === selectedId) : undefined;
+  const importPlugin = useImportPlugin(workspaceId);
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   function selectKind(k: PluginKind) {
     setKindFilter(k);
     setSelectedId(null);
+  }
+
+  async function onImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImportError(null);
+    try {
+      const plugin = await importPlugin.mutateAsync(await file.text());
+      setKindFilter(plugin.kind);
+      setSelectedId(plugin.id);
+    } catch (err) {
+      setImportError(typeof err === "string" ? err : err instanceof Error ? err.message : String(err));
+    }
   }
 
   return (
@@ -108,6 +127,15 @@ export function PluginManagerDialog({ workspaceId, onClose }: { workspaceId: str
             >
               <Plus size={12} /> New
             </button>
+            <button
+              type="button"
+              onClick={() => importFileRef.current?.click()}
+              className="mb-2 flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-accent hover:bg-accent/10"
+            >
+              <Upload size={12} /> Import…
+            </button>
+            <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={onImportFile} />
+            {importError && <p className="mb-2 px-2 text-xs text-red-500">{importError}</p>}
             {(plugins ?? []).map((p) => (
               <button
                 key={p.id}
@@ -184,8 +212,9 @@ function PluginEditor({
   const createPlugin = useCreatePlugin(workspaceId);
   const updatePlugin = useUpdatePlugin(workspaceId);
   const deletePlugin = useDeletePlugin(workspaceId);
+  const exportPlugin = useExportPlugin();
 
-  function save() {
+  function savePlugin() {
     if (plugin) {
       updatePlugin.mutate({ id: plugin.id, input: draft }, { onSuccess: onDone });
     } else {
@@ -197,6 +226,18 @@ function PluginEditor({
     if (!plugin) return;
     if (confirmDelete(`Delete plugin "${plugin.name}"? This can't be undone.`)) {
       deletePlugin.mutate(plugin.id, { onSuccess: onDone });
+    }
+  }
+
+  async function exportToFile() {
+    if (!plugin) return;
+    try {
+      const content = await exportPlugin.mutateAsync(plugin.id);
+      const path = await save({ defaultPath: `${plugin.name.replace(/\s+/g, "_")}.plugin.json` });
+      if (!path) return;
+      await ipc.writeFileBytes(path, textToBase64(content));
+    } catch (e) {
+      console.error("failed to export plugin:", e);
     }
   }
 
@@ -270,6 +311,16 @@ function PluginEditor({
         {plugin && (
           <button
             type="button"
+            onClick={() => void exportToFile()}
+            disabled={exportPlugin.isPending}
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-700"
+          >
+            <Download size={12} /> Export
+          </button>
+        )}
+        {plugin && (
+          <button
+            type="button"
             onClick={remove}
             className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30"
           >
@@ -279,7 +330,7 @@ function PluginEditor({
         <button
           type="button"
           disabled={saving}
-          onClick={save}
+          onClick={savePlugin}
           className="ml-auto rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
         >
           {saving ? "Saving…" : plugin ? "Save" : "Create"}

@@ -148,6 +148,8 @@ pub fn run() {
             commands::create_plugin,
             commands::update_plugin,
             commands::delete_plugin,
+            commands::export_plugin,
+            commands::import_plugin,
             commands::preview_plugin_codegen,
             commands::preview_plugin_import,
             commands::preview_plugin_export,

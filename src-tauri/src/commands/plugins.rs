@@ -36,6 +36,24 @@ pub fn delete_plugin(state: State<'_, AppState>, id: String) -> AppResult<()> {
     store::plugins::delete(&conn, &id)
 }
 
+/// Serializes a plugin's config (name/kind/label/source/enabled) to a JSON
+/// string for saving to disk — same shareable-backup convention as
+/// `export_mock_server`. No secrets live in a plugin's JS source, so unlike
+/// environment export this needs no masking.
+#[tauri::command]
+pub fn export_plugin(state: State<'_, AppState>, id: String) -> AppResult<String> {
+    let conn = state.db.lock().unwrap();
+    store::plugins::export(&conn, &id)
+}
+
+/// Creates a new plugin in `workspace_id` from a previously exported JSON
+/// string.
+#[tauri::command]
+pub fn import_plugin(state: State<'_, AppState>, workspace_id: String, content: String) -> AppResult<Plugin> {
+    let conn = state.db.lock().unwrap();
+    store::plugins::import(&conn, &workspace_id, &content)
+}
+
 /// Run a codegen plugin's `source` against `req` without persisting it —
 /// lets the plugin editor show live output while the user is still writing
 /// the plugin.
