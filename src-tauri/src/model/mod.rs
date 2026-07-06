@@ -22,7 +22,7 @@ pub use auth::AuthConfig;
 pub use collection::Collection;
 pub use environment::Environment;
 pub use history::{HistoryEntry, HistoryFilter};
-pub use mock::{MockRule, MockRuleInput, MockServer, MockServerInput};
+pub use mock::{BodyMatchMode, BodyMatcher, MockMatcher, MockRule, MockRuleInput, MockServer, MockServerInput};
 pub use plugin::{Plugin, PluginInput, PluginKind};
 pub use request::{RequestKind, SavedRequest, SavedRequestInput};
 pub use tab::Tab;

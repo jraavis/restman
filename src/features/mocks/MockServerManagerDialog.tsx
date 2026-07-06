@@ -2,19 +2,24 @@
 //! their method+path -> canned-response rules, start/stop each server's
 //! live loopback socket. Same modal shell as `PluginManagerDialog`.
 
-import { useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { confirmDelete } from "../../lib/confirmDelete";
-import { ChevronDown, ChevronRight, Play, Plus, Square, Trash2 } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { ChevronDown, ChevronRight, Download, Play, Plus, Square, Trash2, Upload } from "lucide-react";
 import { useCollections } from "../collections/hooks";
 import { KeyValueEditor, type Pair } from "../request/KeyValueEditor";
+import { ipc } from "../../lib/ipc";
+import { textToBase64 } from "../../lib/encoding";
 import type { HeaderEntry } from "../../lib/http";
-import type { MockRule, MockRuleInput, MockServer, MockServerInput } from "../../lib/types";
+import type { BodyMatchMode, BodyMatcher, MockMatcher, MockRule, MockRuleInput, MockServer, MockServerInput } from "../../lib/types";
 import {
   useCreateMockRule,
   useCreateMockServer,
   useCreateMockServerFromCollection,
   useDeleteMockRule,
   useDeleteMockServer,
+  useExportMockServer,
+  useImportMockServer,
   useMockRules,
   useMockServers,
   useRunningMockServerIds,
@@ -27,7 +32,18 @@ import {
 const METHODS = ["ANY", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 function emptyRuleInput(sortOrder: number): MockRuleInput {
-  return { method: "GET", pathPattern: "/", status: 200, headers: [], body: "", delayMs: 0, sortOrder };
+  return {
+    method: "GET",
+    pathPattern: "/",
+    status: 200,
+    headers: [],
+    body: "",
+    delayMs: 0,
+    sortOrder,
+    queryMatchers: [],
+    headerMatchers: [],
+    bodyMatcher: null,
+  };
 }
 
 export function MockServerManagerDialog({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
@@ -39,6 +55,22 @@ export function MockServerManagerDialog({ workspaceId, onClose }: { workspaceId:
 
   const selected = selectedId && selectedId !== "new" ? servers?.find((s) => s.id === selectedId) : undefined;
   const running = new Set(runningIds ?? []);
+  const importServer = useImportMockServer(workspaceId);
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  async function onImportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImportError(null);
+    try {
+      const server = await importServer.mutateAsync(await file.text());
+      setSelectedId(server.id);
+    } catch (err) {
+      setImportError(typeof err === "string" ? err : err instanceof Error ? err.message : String(err));
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
@@ -70,10 +102,19 @@ export function MockServerManagerDialog({ workspaceId, onClose }: { workspaceId:
               type="button"
               disabled={!collections?.length}
               onClick={() => setFromCollectionOpen(true)}
-              className="mb-2 flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-accent hover:bg-accent/10 disabled:opacity-40"
+              className="mb-1 flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-accent hover:bg-accent/10 disabled:opacity-40"
             >
               <Plus size={12} /> From collection…
             </button>
+            <button
+              type="button"
+              onClick={() => importFileRef.current?.click()}
+              className="mb-2 flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-accent hover:bg-accent/10"
+            >
+              <Upload size={12} /> Import…
+            </button>
+            <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={onImportFile} />
+            {importError && <p className="mb-2 px-2 text-xs text-red-500">{importError}</p>}
             {(servers ?? []).map((s) => (
               <button
                 key={s.id}
@@ -229,9 +270,10 @@ function MockServerEditor({
   const deleteServer = useDeleteMockServer(workspaceId);
   const startServer = useStartMockServer();
   const stopServer = useStopMockServer();
+  const exportServer = useExportMockServer();
   const [startError, setStartError] = useState<string | null>(null);
 
-  function save() {
+  function saveServer() {
     if (server) {
       updateServer.mutate({ id: server.id, input: draft });
     } else {
@@ -243,6 +285,18 @@ function MockServerEditor({
     if (!server) return;
     if (confirmDelete(`Delete mock server "${server.name}"? This can't be undone.`)) {
       deleteServer.mutate(server.id, { onSuccess: onDone });
+    }
+  }
+
+  async function exportToFile() {
+    if (!server) return;
+    try {
+      const content = await exportServer.mutateAsync(server.id);
+      const path = await save({ defaultPath: `${server.name.replace(/\s+/g, "_")}.mock.json` });
+      if (!path) return;
+      await ipc.writeFileBytes(path, textToBase64(content));
+    } catch (e) {
+      console.error("failed to export mock server:", e);
     }
   }
 
@@ -298,11 +352,21 @@ function MockServerEditor({
         <button
           type="button"
           disabled={saving}
-          onClick={save}
+          onClick={saveServer}
           className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
         >
           {saving ? "Saving…" : server ? "Save" : "Create"}
         </button>
+        {server && (
+          <button
+            type="button"
+            onClick={exportToFile}
+            disabled={exportServer.isPending}
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-700"
+          >
+            <Download size={12} /> Export
+          </button>
+        )}
         {server && (
           <button
             type="button"
@@ -319,12 +383,20 @@ function MockServerEditor({
   );
 }
 
-/** `HeaderEntry` (name/value/enabled) ↔ `KeyValueEditor`'s `Pair`
- * (key/value/enabled) — same mapping convention `RequestBuilder` uses. */
+/** `HeaderEntry`/`MockMatcher` (name/value/enabled) ↔ `KeyValueEditor`'s
+ * `Pair` (key/value/enabled) — same mapping convention `RequestBuilder` uses. */
 const headersToPairs = (headers: HeaderEntry[]): Pair[] =>
   headers.map((h) => ({ key: h.name, value: h.value, enabled: h.enabled }));
 const pairsToHeaders = (pairs: Pair[]): HeaderEntry[] =>
   pairs.map((p) => ({ name: p.key, value: p.value, enabled: p.enabled }));
+const matchersToPairs = (matchers: MockMatcher[]): Pair[] =>
+  matchers.map((m) => ({ key: m.name, value: m.value, enabled: m.enabled }));
+const pairsToMatchers = (pairs: Pair[]): MockMatcher[] =>
+  pairs.map((p) => ({ name: p.key, value: p.value, enabled: p.enabled }));
+
+function matcherCount(rule: MockRule): number {
+  return rule.queryMatchers.length + rule.headerMatchers.length + (rule.bodyMatcher ? 1 : 0);
+}
 
 function RulesTable({ mockServerId }: { mockServerId: string }) {
   const { data: rules } = useMockRules(mockServerId);
@@ -332,6 +404,7 @@ function RulesTable({ mockServerId }: { mockServerId: string }) {
   const updateRule = useUpdateMockRule(mockServerId);
   const deleteRule = useDeleteMockRule(mockServerId);
   const [headersOpenId, setHeadersOpenId] = useState<string | null>(null);
+  const [matchOpenId, setMatchOpenId] = useState<string | null>(null);
 
   function addRule() {
     createRule.mutate(emptyRuleInput(rules?.length ?? 0));
@@ -348,6 +421,9 @@ function RulesTable({ mockServerId }: { mockServerId: string }) {
         body: rule.body,
         delayMs: rule.delayMs,
         sortOrder: rule.sortOrder,
+        queryMatchers: rule.queryMatchers,
+        headerMatchers: rule.headerMatchers,
+        bodyMatcher: rule.bodyMatcher,
         ...patch,
       },
     });
@@ -418,6 +494,15 @@ function RulesTable({ mockServerId }: { mockServerId: string }) {
             </button>
             <button
               type="button"
+              onClick={() => setMatchOpenId(matchOpenId === rule.id ? null : rule.id)}
+              title="Extra match conditions (query/header/body) — narrows this rule beyond method+path"
+              className="flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
+            >
+              {matchOpenId === rule.id ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              Match{matcherCount(rule) > 0 ? ` (${matcherCount(rule)})` : ""}
+            </button>
+            <button
+              type="button"
               onClick={() => deleteRule.mutate(rule.id)}
               className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40"
             >
@@ -434,8 +519,98 @@ function RulesTable({ mockServerId }: { mockServerId: string }) {
               />
             </div>
           )}
+          {matchOpenId === rule.id && (
+            <RuleMatchersEditor
+              rule={rule}
+              onChange={(patch) => patchRule(rule, patch)}
+            />
+          )}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+const BODY_MATCH_MODES: { value: BodyMatchMode; label: string }[] = [
+  { value: "contains", label: "Body contains" },
+  { value: "jsonEquals", label: "JSON field equals" },
+];
+
+/** Extra request-match conditions on top of method+path: query params and
+ * headers the incoming request must carry, plus an optional body check —
+ * lets two rules share the same method+path and be picked apart by request
+ * content (first match in the list still wins). */
+function RuleMatchersEditor({
+  rule,
+  onChange,
+}: {
+  rule: MockRule;
+  onChange: (patch: Partial<MockRuleInput>) => void;
+}) {
+  const bodyMatcher = rule.bodyMatcher;
+
+  function setBodyMatcherEnabled(enabled: boolean) {
+    onChange({ bodyMatcher: enabled ? { mode: "contains", jsonPath: "", value: "" } : null });
+  }
+
+  function patchBodyMatcher(patch: Partial<BodyMatcher>) {
+    if (!bodyMatcher) return;
+    onChange({ bodyMatcher: { ...bodyMatcher, ...patch } });
+  }
+
+  return (
+    <div className="flex flex-col gap-2 px-1.5 pb-2 text-xs">
+      <div>
+        <span className="mb-1 block text-slate-400 dark:text-slate-500">Query params must match</span>
+        <KeyValueEditor
+          rows={matchersToPairs(rule.queryMatchers)}
+          onChange={(pairs) => onChange({ queryMatchers: pairsToMatchers(pairs) })}
+          keyPlaceholder="Param name"
+          valuePlaceholder="Value"
+        />
+      </div>
+      <div>
+        <span className="mb-1 block text-slate-400 dark:text-slate-500">Request headers must match</span>
+        <KeyValueEditor
+          rows={matchersToPairs(rule.headerMatchers)}
+          onChange={(pairs) => onChange({ headerMatchers: pairsToMatchers(pairs) })}
+          keyPlaceholder="Header name"
+          valuePlaceholder="Value"
+        />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <input type="checkbox" checked={bodyMatcher !== null} onChange={(e) => setBodyMatcherEnabled(e.target.checked)} />
+        <span className="text-slate-400 dark:text-slate-500">Request body must match</span>
+        {bodyMatcher && (
+          <>
+            <select
+              value={bodyMatcher.mode}
+              onChange={(e) => patchBodyMatcher({ mode: e.target.value as BodyMatchMode })}
+              className="rounded border border-slate-200 bg-transparent px-1 py-0.5 dark:border-slate-700"
+            >
+              {BODY_MATCH_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            {bodyMatcher.mode === "jsonEquals" && (
+              <input
+                defaultValue={bodyMatcher.jsonPath}
+                onBlur={(e) => patchBodyMatcher({ jsonPath: e.target.value })}
+                placeholder="user.id"
+                className="w-24 rounded border border-slate-200 bg-transparent px-1 py-0.5 font-mono dark:border-slate-700"
+              />
+            )}
+            <input
+              defaultValue={bodyMatcher.value}
+              onBlur={(e) => patchBodyMatcher({ value: e.target.value })}
+              placeholder="Expected value"
+              className="min-w-0 flex-1 rounded border border-slate-200 bg-transparent px-1 py-0.5 font-mono dark:border-slate-700"
+            />
+          </>
+        )}
       </div>
     </div>
   );

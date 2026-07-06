@@ -352,6 +352,11 @@ export const ipc = {
   startMockServer: (id: string) => invoke<number>("start_mock_server", { id }),
   stopMockServer: (id: string) => invoke<void>("stop_mock_server", { id }),
   listRunningMockServerIds: () => invoke<string[]>("list_running_mock_server_ids"),
+  /** Config-only export (name/port/rules incl. every matcher field) — no
+   * secrets live in a mock rule, unlike `exportEnvironment`, so no masking. */
+  exportMockServer: (id: string) => invoke<string>("export_mock_server", { id }),
+  importMockServer: (workspaceId: string, content: string) =>
+    invoke<MockServer>("import_mock_server", { workspaceId, content }),
 
   // File-based `.restman/` sync (Phase 8) — reads folder path/format from
   // the workspace's own settings row, so both callers only ever need a

@@ -77,6 +77,10 @@ http = "1"
 # DB-stored rule patterns at runtime (not axum's typed path/query
 # extractors), so only json/tokio/http1 are needed.
 axum = { version = "0.8.9", default-features = false, features = ["json", "tokio", "http1"] }
+# Mock server query-string matching: already a transitive dep of reqwest (via
+# `url`/`serde_urlencoded`) — declared directly so `engine::mock` can decode
+# `?q=hello%20world`-style incoming query strings without a new crate.
+form_urlencoded = "1"
 # Backup/restore (Phase 8): AES-256 encrypts every entry (the archive always
 # carries real, hydrated secrets, unlike every other export path in this
 # codebase, which masks) so a backup file left on a synced drive or in a

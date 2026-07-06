@@ -162,6 +162,8 @@ pub fn run() {
             commands::delete_mock_rule,
             commands::start_mock_server,
             commands::stop_mock_server,
+            commands::export_mock_server,
+            commands::import_mock_server,
             commands::list_running_mock_server_ids,
             commands::sync_export,
             commands::sync_import,

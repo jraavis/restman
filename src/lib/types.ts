@@ -817,8 +817,32 @@ export interface MockServerInput {
   port: number;
 }
 
+/** A request-matching constraint checked against an incoming query
+ * parameter or header (by `name`), on top of the rule's method+path.
+ * Disabled matchers are skipped, same convention as `HeaderEntry`. */
+export interface MockMatcher {
+  name: string;
+  value: string;
+  enabled: boolean;
+}
+
+/** How `BodyMatcher.value` is checked against the incoming request body. */
+export type BodyMatchMode = "contains" | "jsonEquals";
+
+export interface BodyMatcher {
+  mode: BodyMatchMode;
+  /** Dot-separated path (e.g. `user.id`), used only when `mode` is `jsonEquals`. */
+  jsonPath: string;
+  value: string;
+}
+
 /** `method: null` matches any method. `pathPattern` supports `:name`
- * segments matching any single path segment (e.g. `/users/:id`). */
+ * segments matching any single path segment (e.g. `/users/:id`) — the
+ * captured values are available for response templating as `{{name}}` in
+ * `body`/`headers` (path captures only, not environment/collection vars).
+ * `queryMatchers`/`headerMatchers`/`bodyMatcher` are additional constraints
+ * that let two rules share the same method+path and be disambiguated by
+ * request content. */
 export interface MockRule {
   id: string;
   mockServerId: string;
@@ -829,6 +853,9 @@ export interface MockRule {
   body: string;
   delayMs: number;
   sortOrder: number;
+  queryMatchers: MockMatcher[];
+  headerMatchers: MockMatcher[];
+  bodyMatcher: BodyMatcher | null;
 }
 
 export interface MockRuleInput {
@@ -839,4 +866,7 @@ export interface MockRuleInput {
   body: string;
   delayMs: number;
   sortOrder: number;
+  queryMatchers: MockMatcher[];
+  headerMatchers: MockMatcher[];
+  bodyMatcher: BodyMatcher | null;
 }

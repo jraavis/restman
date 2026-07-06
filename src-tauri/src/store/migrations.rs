@@ -283,6 +283,18 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE requests ADD COLUMN kind TEXT NOT NULL DEFAULT 'http';
     ALTER TABLE requests ADD COLUMN stream_config_json TEXT;
     "#,
+    // v10 — mock rule request matchers, beyond `:param` path segments.
+    // `query_matchers_json`/`header_matchers_json` are `Vec<MockMatcher>`
+    // (name/value/enabled, same shape convention as `headers_json`);
+    // `body_matcher_json` is an optional single `BodyMatcher`. All three are
+    // additional constraints on top of the existing method+path match, so
+    // existing rules (empty/`NULL`) are unaffected — they still match on
+    // method+path alone.
+    r#"
+    ALTER TABLE mock_rules ADD COLUMN query_matchers_json TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE mock_rules ADD COLUMN header_matchers_json TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE mock_rules ADD COLUMN body_matcher_json TEXT;
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

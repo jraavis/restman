@@ -136,3 +136,21 @@ pub fn stop_mock_server(state: State<'_, AppState>, id: String) -> AppResult<()>
 pub fn list_running_mock_server_ids(state: State<'_, AppState>) -> Vec<String> {
     state.mock_servers.lock().unwrap().keys().cloned().collect()
 }
+
+/// Serializes a mock server's config (name/port/rules, including every
+/// matcher field) to a JSON string for saving to disk — same shareable-
+/// backup convention as `export_environment`. No secrets live in a mock
+/// rule's fields, so unlike environment export this needs no masking.
+#[tauri::command]
+pub fn export_mock_server(state: State<'_, AppState>, id: String) -> AppResult<String> {
+    let conn = state.db.lock().unwrap();
+    store::mock_servers::export_server(&conn, &id)
+}
+
+/// Creates a new mock server (and its rules) from a previously exported
+/// JSON string, into `workspace_id`.
+#[tauri::command]
+pub fn import_mock_server(state: State<'_, AppState>, workspace_id: String, content: String) -> AppResult<MockServer> {
+    let conn = state.db.lock().unwrap();
+    store::mock_servers::import_server(&conn, &workspace_id, &content)
+}

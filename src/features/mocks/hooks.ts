@@ -83,6 +83,18 @@ export function useStopMockServer() {
   });
 }
 
+export function useExportMockServer() {
+  return useMutation({ mutationFn: (id: string) => ipc.exportMockServer(id) });
+}
+
+export function useImportMockServer(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (content: string) => ipc.importMockServer(workspaceId, content),
+    onSuccess: () => qc.invalidateQueries({ queryKey: mockServerKeys.all(workspaceId) }),
+  });
+}
+
 export function useMockRules(mockServerId: string | undefined) {
   return useQuery({
     queryKey: mockRuleKeys.all(mockServerId ?? ""),
