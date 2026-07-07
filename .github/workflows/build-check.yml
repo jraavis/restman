@@ -1,0 +1,83 @@
+# Cross-platform build verification — NOT a release/publish workflow.
+#
+# tauri.conf.json's bundle.targets lists dmg/app/msi/nsis/deb/rpm/appimage,
+# but only the macOS half has ever actually been built (see release.yml,
+# which is macOS-only, and PLAN.md's "cross-platform release verification"
+# open item). This workflow proves `cargo tauri build` actually produces
+# the Windows/Linux artifacts on real runners, and that restman-cli's
+# `dirs`-based --db default path at least compiles/tests on each OS.
+#
+# Artifacts are uploaded to the Actions run (actions/upload-artifact), never
+# to a GitHub Release — no updater/latest.json involvement, nothing public.
+#
+# Trigger: manual only (workflow_dispatch). Not on push/tag — this is a
+# verification tool, not part of the release path.
+
+name: Build check (cross-platform)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundles: app,dmg
+          - os: windows-latest
+            bundles: msi,nsis
+          - os: ubuntu-22.04
+            bundles: deb,rpm,appimage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Tauri v2 on Linux needs webkit2gtk 4.1+ (hence ubuntu-22.04, not 20.04)
+      # plus the AppIndicator/rsvg/patchelf deps tauri-action itself doesn't install.
+      - name: Install Linux system deps
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev
+
+      - run: npm ci
+
+      - name: cargo test (lib + restman-cli, per-OS --db default path)
+        working-directory: src-tauri
+        run: cargo test --lib --bin restman-cli
+
+      - uses: tauri-apps/tauri-action@v1
+        with:
+          args: --bundles ${{ matrix.bundles }}
+
+      - name: Upload built bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.app
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
+            src-tauri/target/release/bundle/**/*.AppImage
+          if-no-files-found: error

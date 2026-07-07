@@ -1,18 +1,21 @@
-# Build + publish a macOS release (universal ARM64+Intel), unsigned by Apple.
+# Build + publish a cross-platform release: macOS (universal ARM64+Intel,
+# ad-hoc signed, unrelated to the Tauri updater signature), Windows
+# (msi+nsis), Linux (deb+rpm+appimage).
 #
-# No Apple Developer ID is involved: with no APPLE_* secrets configured,
-# Tauri ad-hoc-signs the .app, so downloaders must clear Gatekeeper once
-# (right-click > Open, or `xattr -d com.apple.quarantine`). Updater
-# artifacts ARE cryptographically signed — with this repo's Tauri updater
-# key (`TAURI_SIGNING_PRIVATE_KEY` secret, the counterpart of the pubkey
-# in src-tauri/tauri.conf.json), which is unrelated to Apple signing.
+# Trigger: push a `v*` tag (e.g. `git tag v0.4.4 && git push origin v0.4.4`)
+# or run manually via workflow_dispatch. Each platform is a separate matrix
+# job; tauri-action uploads assets to the same release (shared tagName) and
+# merges its platform entry into the release's latest.json rather than
+# clobbering it. The release is created as a DRAFT during the matrix so a
+# partially-built release (e.g. macOS done, Linux still building) is never
+# visible to updater clients; a final `publish` job un-drafts it only after
+# every platform leg succeeds.
 #
-# Trigger: push a `v*` tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`)
-# or run manually via workflow_dispatch. tauri-action creates/updates the
-# GitHub release, uploads the .dmg + .app.tar.gz + .sig, and generates the
-# `latest.json` the updater endpoint in tauri.conf.json already points at.
+# TAURI_SIGNING_PRIVATE_KEY(_PASSWORD): the updater signing key (counterpart
+# of the pubkey in src-tauri/tauri.conf.json) — unrelated to Apple/Windows
+# code-signing certs, which this repo doesn't have.
 
-name: Release (macOS)
+name: Release
 
 on:
   push:
@@ -24,8 +27,34 @@ permissions:
   contents: write
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
+  check-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if package.json / Cargo.toml / tauri.conf.json versions disagree
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          CARGO=$(node -p "require('fs').readFileSync('src-tauri/Cargo.toml','utf8').match(/^version = \"([^\"]+)\"/m)[1]")
+          TAURI=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "package.json=$PKG  Cargo.toml=$CARGO  tauri.conf.json=$TAURI"
+          if [ "$PKG" != "$CARGO" ] || [ "$PKG" != "$TAURI" ]; then
+            echo "::error::Version mismatch across package.json ($PKG), Cargo.toml ($CARGO), tauri.conf.json ($TAURI) — the release tag is derived from tauri.conf.json, so a drift here silently retags/overwrites the wrong version."
+            exit 1
+          fi
+
+  build:
+    needs: check-versions
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target universal-apple-darwin --bundles app,dmg
+          - platform: ubuntu-22.04
+            args: --bundles deb,rpm,appimage
+          - platform: windows-latest
+            args: --bundles msi,nsis
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,12 +65,24 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          # Both halves of the universal binary.
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+
+      # Tauri v2 needs webkit2gtk 4.1+, hence ubuntu-22.04 (not 20.04).
+      - name: Install Linux system deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils \
+            libgtk-3-dev
 
       - run: npm ci
 
@@ -53,14 +94,21 @@ jobs:
           # explicit empty string stops the CLI from prompting interactively.
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
-          # __VERSION__ resolves to tauri.conf.json's version, so a
-          # workflow_dispatch run (no pushed tag) still creates/updates the
-          # right release. Published (not draft) because the updater endpoint
-          # uses releases/latest/download/latest.json, which drafts don't serve.
           tagName: v__VERSION__
           releaseName: "restman v__VERSION__"
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
-          # macOS-only bundles; the config's cross-platform targets list
-          # (msi/deb/...) is irrelevant on this runner.
-          args: --target universal-apple-darwin --bundles app,dmg
+          args: ${{ matrix.args }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Un-draft the release now that every platform leg succeeded
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          gh release edit "v$VERSION" --draft=false --repo "${{ github.repository }}"
