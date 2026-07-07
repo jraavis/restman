@@ -65,6 +65,13 @@ jobs:
         run: cargo test --lib --bin restman-cli
 
       - uses: tauri-apps/tauri-action@v1
+        env:
+          # tauri.conf.json's pubkey means every build tries to sign an
+          # updater artifact (app.tar.gz/nsis-updater/appimage), even
+          # build-only ones — omitting this fails with "public key found,
+          # but no private key" before any bundle is even attempted.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           args: --bundles ${{ matrix.bundles }}
 
