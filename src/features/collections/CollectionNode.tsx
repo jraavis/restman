@@ -24,6 +24,7 @@ import {
   Upload,
 } from "lucide-react";
 import { useDismissable } from "../../lib/useDismissable";
+import { ModalPortal } from "../../components/ModalPortal";
 import { textToBase64 } from "../../lib/encoding";
 import { defaultRequest } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
@@ -466,19 +467,21 @@ export function CollectionNode({
       )}
 
       {runnerOpen && workspaceId && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-        >
-          <div className="h-[70vh] w-[640px] max-w-[95vw] overflow-hidden rounded-xl border border-slate-200 shadow-2xl dark:border-slate-700">
-            <CollectionRunner
-              workspaceId={workspaceId}
-              collectionId={collection.id}
-              collectionName={collection.name}
-              onClose={() => setRunnerOpen(false)}
-            />
+        <ModalPortal>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          >
+            <div className="h-[70vh] w-[640px] max-w-[95vw] overflow-hidden rounded-xl border border-slate-200 shadow-2xl dark:border-slate-700">
+              <CollectionRunner
+                workspaceId={workspaceId}
+                collectionId={collection.id}
+                collectionName={collection.name}
+                onClose={() => setRunnerOpen(false)}
+              />
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </div>
   );

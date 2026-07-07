@@ -4,6 +4,7 @@
 //! `model::auth::RequestAuth`'s doc comment.
 
 import { useState } from "react";
+import { ModalPortal } from "../../components/ModalPortal";
 import { emptyAuthConfig, type AuthConfig, type AuthType, type Collection } from "../../lib/types";
 import { ALL_AUTH_TYPES, AUTH_TYPE_LABELS, AuthConfigFields, inputClass } from "../request/AuthConfigFields";
 import { useUpdateCollectionAuth } from "./hooks";
@@ -25,6 +26,7 @@ export function CollectionAuthDialog({
   }
 
   return (
+    <ModalPortal>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
@@ -72,5 +74,6 @@ export function CollectionAuthDialog({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

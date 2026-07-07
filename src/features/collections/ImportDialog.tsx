@@ -8,6 +8,7 @@ import { useState, type ChangeEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, CheckCircle2, ChevronRight, File, Folder, FolderOpen, Upload } from "lucide-react";
 import { ipc } from "../../lib/ipc";
+import { ModalPortal } from "../../components/ModalPortal";
 import { usePlugins } from "../plugins/hooks";
 import type {
   ConflictMode,
@@ -179,6 +180,7 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
   }
 
   return (
+    <ModalPortal>
     <div onClick={(e) => e.stopPropagation()} className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="flex max-h-[80vh] w-[520px] max-w-[95vw] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white text-sm shadow-2xl dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
@@ -438,6 +440,7 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
