@@ -1,6 +1,6 @@
 //! Request body editor covering all seven modes.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { BookOpen, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { LazyCodeEditor } from "../../components/LazyCodeEditor";
 import { VariableSuggestInput } from "../../components/VariableSuggestInput";
@@ -15,6 +15,9 @@ import type { GraphqlSchemaStatus } from "./graphqlSchemaHooks";
 import { KeyValueEditor, type Pair } from "./KeyValueEditor";
 import { LazyGraphqlDocsExplorer } from "./LazyGraphqlDocsExplorer";
 import type { GraphQLSchema } from "graphql";
+// Type-only — erased at compile time, so this doesn't pull Monaco's runtime
+// bundle into this (non-lazy) module the way a value import would.
+import type { editor as MonacoEditor } from "monaco-editor";
 
 /** `BodyEditor` doesn't have workspace/collection/request context, so
  * `RequestBuilder` (which does) binds `useGraphqlSchema()`'s `fetchSchema`
@@ -176,6 +179,31 @@ function GraphqlBody({
 }) {
   const [docsOpen, setDocsOpen] = useState(false);
   const status = schemaState?.status ?? "idle";
+  const queryEditorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
+
+  /** Splices `name` in at the query editor's current cursor position (or
+   * over its current selection, if any) instead of always appending to the
+   * end. Falls back to the old append-at-end behavior if the editor hasn't
+   * mounted yet (e.g. `LazyCodeEditor`'s `Suspense` fallback still showing). */
+  function insertFieldAtCursor(name: string) {
+    const ed = queryEditorRef.current;
+    const range = ed?.getSelection();
+    if (!ed || !range) {
+      onChange({
+        mode: "graphql",
+        data: {
+          ...body.data,
+          query: body.data.query + (body.data.query.endsWith("\n") || body.data.query === "" ? "" : "\n") + name,
+        },
+      });
+      return;
+    }
+    ed.executeEdits("graphql-docs-insert", [{ range, text: name, forceMoveMarkers: true }]);
+    const endPos = { lineNumber: range.startLineNumber, column: range.startColumn + name.length };
+    ed.setSelection({ startLineNumber: endPos.lineNumber, startColumn: endPos.column, endLineNumber: endPos.lineNumber, endColumn: endPos.column });
+    ed.revealPositionInCenterIfOutsideViewport(endPos);
+    ed.focus();
+  }
 
   return (
     <div className="flex h-full min-h-0 gap-3">
@@ -219,6 +247,9 @@ function GraphqlBody({
           height="150px"
           value={body.data.query}
           onChange={(v) => onChange({ mode: "graphql", data: { ...body.data, query: v ?? "" } })}
+          onMount={(ed) => {
+            queryEditorRef.current = ed;
+          }}
           variableKeys={variableKeys}
           graphqlSchema={schemaState?.schema}
         />
@@ -240,12 +271,7 @@ function GraphqlBody({
       </div>
       {docsOpen && schemaState?.schema && (
         <div className="w-64 shrink-0 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-800">
-          <LazyGraphqlDocsExplorer
-            schema={schemaState.schema}
-            onInsert={(name) =>
-              onChange({ mode: "graphql", data: { ...body.data, query: body.data.query + (body.data.query.endsWith("\n") || body.data.query === "" ? "" : "\n") + name } })
-            }
-          />
+          <LazyGraphqlDocsExplorer schema={schemaState.schema} onInsert={insertFieldAtCursor} />
         </div>
       )}
     </div>
