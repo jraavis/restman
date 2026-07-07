@@ -88,6 +88,16 @@ form_urlencoded = "1"
 zip = { version = "2.3.0", default-features = false, features = ["aes-crypto", "deflate"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# CLI runner (`src/bin/cli.rs`): needs the same app-data-dir path Tauri's own
+# `app.path().app_data_dir()` resolves internally (see `tauri`'s vendored
+# `src/path/desktop.rs`, which itself just calls `dirs::data_dir()` + the
+# bundle identifier) so the CLI opens the exact same on-disk DB as the GUI.
+# Already a transitive dep of `tauri` at the exact same resolved version
+# (confirmed via `cargo add --dry-run dirs` before adding), so this adds no
+# new crate to the build, just names one already in the dependency graph.
+dirs = "6.0.0"
+# CLI runner arg parsing. Minimal features only (no `env`/`cargo`/`unicode`).
+clap = { version = "4.6.1", default-features = false, features = ["derive", "std", "help", "usage", "error-context", "suggestions"] }
 
 [dev-dependencies]
 url = "2"
