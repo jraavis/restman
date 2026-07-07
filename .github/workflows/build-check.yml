@@ -75,6 +75,40 @@ jobs:
         with:
           args: --bundles ${{ matrix.bundles }}
 
+      # Guard against the wrong-binary-bundled class of bug: with two bin
+      # targets (restman GUI, restman-cli), tauri-cli once selected the CLI
+      # as the app's main binary and mainBinaryName merely renamed it — the
+      # file was called "restman" but was the headless CLI (caught only
+      # because macOS Gatekeeper said "damaged"; filename/Info.plist checks
+      # passed). Identity, not name: the GUI links wry (webview), the CLI
+      # never does, and on macOS the linker-signed identifier bakes in the
+      # true crate name at link time.
+      - name: Assert bundled binary is the GUI (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          APP=src-tauri/target/release/bundle/macos/restman.app
+          ID=$(codesign -dv "$APP" 2>&1 | grep '^Identifier=' | cut -d= -f2)
+          echo "signing identifier: $ID"
+          case "$ID" in
+            restman_cli*) echo "::error::bundled binary is restman-cli (identifier $ID)"; exit 1;;
+          esac
+          WRY=$(strings "$APP/Contents/MacOS/restman" | grep -c wry || true)
+          echo "wry string hits: $WRY"
+          if [ "$WRY" -eq 0 ]; then
+            echo "::error::no wry strings in bundled binary — this is not the GUI build"; exit 1
+          fi
+
+      - name: Assert bundled binary is the GUI (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          DEB=$(ls src-tauri/target/release/bundle/deb/*.deb)
+          dpkg-deb --fsys-tarfile "$DEB" | tar -xO ./usr/bin/restman > /tmp/deb-restman
+          WRY=$(strings /tmp/deb-restman | grep -c wry || true)
+          echo "wry string hits: $WRY"
+          if [ "$WRY" -eq 0 ]; then
+            echo "::error::no wry strings in .deb's usr/bin/restman — this is not the GUI build"; exit 1
+          fi
+
       - name: Upload built bundles
         uses: actions/upload-artifact@v4
         with:

@@ -4,6 +4,13 @@ version = "0.4.4"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
+# Two bin targets exist (the GUI `restman` from src/main.rs and the headless
+# `restman-cli` from src/bin/restman-cli.rs). tauri-cli picks the app's main
+# binary via this field (falling back to package-name match, which proved
+# unreliable with a second bin present): without it, `tauri build` bundled
+# restman-cli as the .app executable — `mainBinaryName` in tauri.conf.json
+# only RENAMES the selected output afterward, it does not do the selecting.
+default-run = "restman"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
