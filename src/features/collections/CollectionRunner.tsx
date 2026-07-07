@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -23,6 +24,8 @@ import type {
   RequestRunResult,
   RunnerProgress,
 } from "../../lib/types";
+import { useRequests } from "./hooks";
+import { buildCsvSample, buildJsonSample, extractTemplateVarNames } from "./runnerSampleData";
 
 interface CollectionRunnerProps {
   workspaceId: string;
@@ -57,6 +60,11 @@ export function CollectionRunner({
   const [parallel, setParallel] = useState(false);
   const [data, setData] = useState("");
   const unlisten = useRef<(() => void) | null>(null);
+  const requestsQuery = useRequests(collectionId);
+  const templateVarNames = useMemo(
+    () => extractTemplateVarNames(requestsQuery.data ?? []),
+    [requestsQuery.data],
+  );
 
   // Clean up event listener on unmount.
   useEffect(() => () => unlisten.current?.(), []);
@@ -188,7 +196,33 @@ export function CollectionRunner({
             Run in parallel
           </label>
           <label className="flex flex-col gap-0.5 text-xs text-slate-600 dark:text-slate-300">
-            Data (CSV/JSON)
+            <span className="flex items-center gap-1.5">
+              Data (CSV/JSON)
+              <button
+                type="button"
+                onClick={() => setData(buildCsvSample(templateVarNames))}
+                title={
+                  templateVarNames.length > 0
+                    ? `Starter CSV using this collection's {{${templateVarNames.join("}}, {{")}}} vars`
+                    : "Starter CSV — no {{vars}} found in this collection, using a generic example"
+                }
+                className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+              >
+                Insert CSV sample
+              </button>
+              <button
+                type="button"
+                onClick={() => setData(buildJsonSample(templateVarNames))}
+                title={
+                  templateVarNames.length > 0
+                    ? `Starter JSON using this collection's {{${templateVarNames.join("}}, {{")}}} vars`
+                    : "Starter JSON — no {{vars}} found in this collection, using a generic example"
+                }
+                className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+              >
+                Insert JSON sample
+              </button>
+            </span>
             <textarea
               value={data}
               onChange={(e) => setData(e.target.value)}
