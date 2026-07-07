@@ -86,6 +86,24 @@ jobs:
 
       - run: npm ci
 
+      # The universal macOS build only lipos the MAIN binary (restman), but
+      # the bundler still copies every cargo bin target into the .app — so
+      # target/universal-apple-darwin/release/restman-cli must exist or the
+      # bundle step fails ("Failed to copy binary ... does not exist").
+      # Pre-build both arches of the CLI and lipo them ourselves; single-arch
+      # platforms (Windows/Linux) get restman-cli from the ordinary build.
+      - name: Pre-build universal restman-cli (macOS)
+        if: matrix.platform == 'macos-latest'
+        working-directory: src-tauri
+        run: |
+          cargo build --release --bin restman-cli --target aarch64-apple-darwin
+          cargo build --release --bin restman-cli --target x86_64-apple-darwin
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create \
+            target/aarch64-apple-darwin/release/restman-cli \
+            target/x86_64-apple-darwin/release/restman-cli \
+            -output target/universal-apple-darwin/release/restman-cli
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
