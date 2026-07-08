@@ -108,6 +108,27 @@ describe("ImportDialog", () => {
     expect(await screen.findByText(/unsupported auth type: digest/)).toBeInTheDocument();
   });
 
+  it("calls onImported after a successful collection import", async () => {
+    vi.mocked(ipc.previewImport).mockResolvedValue(makePreview());
+    vi.mocked(ipc.applyCollectionImport).mockResolvedValue({
+      createdCollections: 1,
+      createdRequests: 1,
+      skipped: 0,
+      overwritten: 0,
+      warnings: [],
+    });
+    const onImported = vi.fn();
+
+    renderWithClient(
+      <ImportDialog workspaceId="ws-1" parentId="col-parent" onClose={() => {}} onImported={onImported} />,
+    );
+    pasteJson("{}");
+    await screen.findByText("Pet Store");
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
+  });
+
   it("confirms import with the selected conflict mode and shows the report", async () => {
     vi.mocked(ipc.previewImport).mockResolvedValue(makePreview());
     const report: ImportReport = {
@@ -132,12 +153,25 @@ describe("ImportDialog", () => {
         "col-parent",
         expect.objectContaining({ name: "Pet Store" }),
         "merge",
+        "as_subfolder",
       ),
     );
     expect(await screen.findByText(/Import complete/i)).toBeInTheDocument();
     expect(screen.getByText("2 folders created")).toBeInTheDocument();
     expect(screen.getByText("5 requests created")).toBeInTheDocument();
     expect(screen.getByText(/1 skipped/)).toBeInTheDocument();
+  });
+
+  it("shows placement options when importing into a folder and defaults curl to into_folder", async () => {
+    renderWithClient(
+      <ImportDialog workspaceId="ws-1" parentId="col-parent" parentName="API" onClose={() => {}} />,
+    );
+    expect(screen.getByText(/Add to "API"/)).toBeInTheDocument();
+    expect(screen.getByText("Import as subfolder")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Add to "API"/)).not.toBeChecked();
+
+    fireEvent.change(screen.getByRole("combobox", { name: /Format/i }), { target: { value: "native:curl" } });
+    expect(screen.getByLabelText(/Add to "API"/)).toBeChecked();
   });
 
   it("shows an error message when preview parsing fails", async () => {

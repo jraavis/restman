@@ -147,28 +147,28 @@ mod tests {
     #[test]
     fn persist_masks_new_secret_and_hydrate_recovers_it() {
         let owner = owner_key("request", "req-1");
-        let masked = persist(&owner, AuthConfig::Bearer { token: "real-token".into() }).unwrap();
-        assert_eq!(masked, AuthConfig::Bearer { token: SECRET_MASK.into() });
+        let masked = persist(&owner, AuthConfig::Bearer { token: "real-token".into(), prefix: crate::model::auth::default_bearer_prefix() }).unwrap();
+        assert_eq!(masked, AuthConfig::Bearer { token: SECRET_MASK.into(), prefix: crate::model::auth::default_bearer_prefix() });
 
         let real = hydrate(&owner, masked).unwrap();
-        assert_eq!(real, AuthConfig::Bearer { token: "real-token".into() });
+        assert_eq!(real, AuthConfig::Bearer { token: "real-token".into(), prefix: crate::model::auth::default_bearer_prefix() });
     }
 
     #[test]
     fn persist_leaves_mask_untouched_without_keychain_roundtrip() {
         let owner = owner_key("request", "req-2");
-        persist(&owner, AuthConfig::Bearer { token: "first".into() }).unwrap();
+        persist(&owner, AuthConfig::Bearer { token: "first".into(), prefix: crate::model::auth::default_bearer_prefix() }).unwrap();
         // Caller round-trips the mask (e.g. editor saved without touching
         // the field) — must not blow away the real stored value.
-        let masked_again = persist(&owner, AuthConfig::Bearer { token: SECRET_MASK.into() }).unwrap();
-        assert_eq!(masked_again, AuthConfig::Bearer { token: SECRET_MASK.into() });
-        assert_eq!(hydrate(&owner, masked_again).unwrap(), AuthConfig::Bearer { token: "first".into() });
+        let masked_again = persist(&owner, AuthConfig::Bearer { token: SECRET_MASK.into(), prefix: crate::model::auth::default_bearer_prefix() }).unwrap();
+        assert_eq!(masked_again, AuthConfig::Bearer { token: SECRET_MASK.into(), prefix: crate::model::auth::default_bearer_prefix() });
+        assert_eq!(hydrate(&owner, masked_again).unwrap(), AuthConfig::Bearer { token: "first".into(), prefix: crate::model::auth::default_bearer_prefix() });
     }
 
     #[test]
     fn switching_auth_type_sweeps_previous_secret() {
         let owner = owner_key("collection", "col-1");
-        persist(&owner, AuthConfig::Bearer { token: "tok".into() }).unwrap();
+        persist(&owner, AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() }).unwrap();
         persist(
             &owner,
             AuthConfig::ApiKey { key: "X-Key".into(), value: "v".into(), location: ApiKeyLocation::Header },
@@ -182,15 +182,15 @@ mod tests {
     #[test]
     fn empty_secret_field_clears_keychain_without_storing_mask() {
         let owner = owner_key("request", "req-3");
-        persist(&owner, AuthConfig::Bearer { token: "tok".into() }).unwrap();
-        let cleared = persist(&owner, AuthConfig::Bearer { token: String::new() }).unwrap();
-        assert_eq!(cleared, AuthConfig::Bearer { token: String::new() });
+        persist(&owner, AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() }).unwrap();
+        let cleared = persist(&owner, AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() }).unwrap();
+        assert_eq!(cleared, AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() });
         assert_eq!(secrets::get(&slot_key(&owner, "bearer-token")).unwrap(), None);
     }
 
     #[test]
     fn resolve_prefers_request_own_over_collection() {
-        let cfg = AuthConfig::Bearer { token: SECRET_MASK.into() };
+        let cfg = AuthConfig::Bearer { token: SECRET_MASK.into(), prefix: crate::model::auth::default_bearer_prefix() };
         let (owner, resolved) = resolve(
             Some(("col-1", AuthConfig::Basic { username: "u".into(), password: SECRET_MASK.into() })),
             RequestAuth::Own(cfg.clone()),
@@ -217,7 +217,7 @@ mod tests {
         let owner = owner_key("request", "req-masked");
         let variants = [
             AuthConfig::None,
-            AuthConfig::Bearer { token: "tok".into() },
+            AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() },
             AuthConfig::Basic { username: "u".into(), password: "pw".into() },
             AuthConfig::ApiKey { key: "X-Key".into(), value: "v".into(), location: ApiKeyLocation::Header },
             AuthConfig::OAuth2(crate::model::auth::OAuth2Config {

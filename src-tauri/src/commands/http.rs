@@ -58,6 +58,7 @@ pub async fn send_request(
     // 2. Resolve auth (collection → request, keychain hydration, OAuth2 token
     //    exchange). Lock is released before any .await.
     req.auth = resolve_auth(&state, collection_id.as_deref(), request_id.as_deref()).await?;
+    crate::vars::interpolate_auth(&mut req.auth, &resolved.values);
 
     // 3. Load scripts — prefer non-empty draft overrides, else saved request.
     let (pre_script_src, post_script_src) = {
@@ -115,6 +116,7 @@ pub async fn send_request(
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         crate::vars::interpolate_request(&mut req, &merged);
+        crate::vars::interpolate_auth(&mut req.auth, &merged);
     }
 
     // 4b. Apply per-workspace transport config: inline default headers
@@ -329,19 +331,24 @@ pub(crate) fn persist_env_mutations(
 /// Resolves owner + effective `AuthConfig` for a request (collection→request
 /// inheritance, see `auth::resolve`) and recovers any real secret from the
 /// keychain. Shared by `send_request` and `commands::oauth::start_oauth2_authorization`.
+/// `draft_auth` overrides the saved request auth when provided (codegen
+/// previews the Auth tab's live draft, not just what's persisted); masked
+/// fields in it still hydrate from the keychain under the request owner.
 pub(crate) fn resolve_owner_and_config(
     state: &State<'_, AppState>,
     collection_id: Option<&str>,
     request_id: Option<&str>,
+    draft_auth: Option<RequestAuth>,
 ) -> AppResult<(String, AuthConfig)> {
     let conn = state.db.lock().unwrap();
     let collection_owner = match collection_id {
         Some(cid) => Some((cid, collections::get(&conn, cid)?.auth)),
         None => None,
     };
-    let request_auth = match request_id {
-        Some(rid) => requests::get(&conn, rid)?.auth,
-        None => RequestAuth::Inherit,
+    let request_auth = match (draft_auth, request_id) {
+        (Some(draft), _) => draft,
+        (None, Some(rid)) => requests::get(&conn, rid)?.auth,
+        (None, None) => RequestAuth::Inherit,
     };
     let (owner, masked) = auth::resolve(collection_owner, request_auth, request_id.unwrap_or(""));
     let hydrated = auth::hydrate(&owner, masked)?;
@@ -358,7 +365,7 @@ pub(crate) async fn resolve_auth(
     collection_id: Option<&str>,
     request_id: Option<&str>,
 ) -> AppResult<AuthConfig> {
-    let (owner, hydrated) = resolve_owner_and_config(state, collection_id, request_id)?;
+    let (owner, hydrated) = resolve_owner_and_config(state, collection_id, request_id, None)?;
     match hydrated {
         AuthConfig::OAuth2(cfg) => collapse_oauth2(state, &owner, &cfg).await,
         other => Ok(other),
@@ -391,7 +398,7 @@ async fn collapse_oauth2(
         let conn = state.db.lock().unwrap();
         token_store::put(&conn, owner, &token)?;
     }
-    Ok(AuthConfig::Bearer { token: token.access_token })
+    Ok(AuthConfig::Bearer { token: token.access_token, prefix: crate::model::auth::default_bearer_prefix() })
 }
 
 /// Clear all cookies from the shared jar.

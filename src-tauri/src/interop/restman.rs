@@ -380,7 +380,7 @@ pub fn apply_full(conn: &Connection, content: &str, mode: ConflictMode) -> AppRe
         }
 
         for node in &ws.collections {
-            let r = interop::apply_import(conn, &ws_id, None, node, mode)?;
+            let r = interop::apply_import(conn, &ws_id, None, node, mode, interop::ImportPlacement::AsSubfolder)?;
             report.created_collections += r.created_collections;
             report.created_requests += r.created_requests;
             report.skipped += r.skipped;
@@ -542,7 +542,7 @@ mod tests {
                 .collect(),
             ..Default::default()
         };
-        interop::apply_import(&conn, &ws_id, None, &tree, ConflictMode::Skip).unwrap();
+        interop::apply_import(&conn, &ws_id, None, &tree, ConflictMode::Skip, interop::ImportPlacement::AsSubfolder).unwrap();
 
         let json = export_full(&conn, &[ws_id], false, false).unwrap();
 
@@ -582,7 +582,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        interop::apply_import(&conn, &ws_id, None, &tree, ConflictMode::Skip).unwrap();
+        interop::apply_import(&conn, &ws_id, None, &tree, ConflictMode::Skip, interop::ImportPlacement::AsSubfolder).unwrap();
 
         let json = export_full(&conn, &[ws_id], false, false).unwrap();
 
@@ -605,7 +605,7 @@ mod tests {
         let tree = ImportedNode {
             name: "API".into(),
             description: Some("main".into()),
-            auth: AuthConfig::Bearer { token: "col-secret".into() },
+            auth: AuthConfig::Bearer { token: "col-secret".into(), prefix: crate::model::auth::default_bearer_prefix() },
             requests: vec![ImportedRequest {
                 name: "Login".into(),
                 method: "POST".into(),
@@ -629,7 +629,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        interop::apply_import(conn, default_ws, None, &tree, ConflictMode::Skip).unwrap();
+        interop::apply_import(conn, default_ws, None, &tree, ConflictMode::Skip, interop::ImportPlacement::AsSubfolder).unwrap();
 
         let env = store::environments::create(conn, default_ws, None, "Prod", Some("main")).unwrap();
         store::variables::create(
@@ -680,7 +680,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        interop::apply_import(conn, &second.id, None, &tree2, ConflictMode::Skip).unwrap();
+        interop::apply_import(conn, &second.id, None, &tree2, ConflictMode::Skip, interop::ImportPlacement::AsSubfolder).unwrap();
         second.id
     }
 
@@ -721,7 +721,7 @@ mod tests {
         assert!(stored.auth.is_masked());
         let owner = crate::auth::owner_key("collection", &api.id);
         let real = crate::auth::hydrate(&owner, stored.auth).unwrap();
-        assert_eq!(real, AuthConfig::Bearer { token: "col-secret".into() });
+        assert_eq!(real, AuthConfig::Bearer { token: "col-secret".into(), prefix: crate::model::auth::default_bearer_prefix() });
 
         // Scripts survived.
         let reqs = store::requests::list_by_collection(&fresh, &api.id).unwrap();

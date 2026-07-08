@@ -36,7 +36,7 @@ export interface AwsSigV4Config {
 /** Tagged by `type` — mirrors serde's internally-tagged `AuthConfig` enum. */
 export type AuthConfig =
   | { type: "none" }
-  | { type: "bearer"; token: string }
+  | { type: "bearer"; token: string; prefix: string }
   | { type: "basic"; username: string; password: string }
   | { type: "api_key"; key: string; value: string; location: ApiKeyLocation }
   | ({ type: "o_auth2" } & OAuth2Config)
@@ -77,7 +77,7 @@ export function emptyAuthConfig(type: AuthType): AuthConfig {
     case "none":
       return { type: "none" };
     case "bearer":
-      return { type: "bearer", token: "" };
+      return { type: "bearer", token: "", prefix: "Bearer" };
     case "basic":
       return { type: "basic", username: "", password: "" };
     case "api_key":
@@ -524,6 +524,9 @@ export interface ImportPreview {
 }
 
 export type ConflictMode = "skip" | "overwrite" | "merge";
+
+/** Where to place an import when targeting an existing folder. Ignored at workspace root. */
+export type ImportPlacement = "into_folder" | "as_subfolder";
 
 export interface ImportReport {
   createdCollections: number;

@@ -418,8 +418,8 @@ fn apply_auth(
 ) -> AppResult<()> {
     match auth {
         AuthConfig::None => {}
-        AuthConfig::Bearer { token } => {
-            header_pairs.push(("Authorization".to_string(), format!("Bearer {token}")));
+        AuthConfig::Bearer { token, prefix } => {
+            header_pairs.push(("Authorization".to_string(), crate::model::auth::bearer_header_value(prefix, token)));
         }
         AuthConfig::Basic { username, password } => {
             let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
@@ -708,8 +708,20 @@ mod tests {
     fn apply_auth_bearer_adds_authorization_header() {
         let mut url = Url::parse("https://example.com").unwrap();
         let mut headers = no_headers();
-        apply_auth(&Method::GET, &mut url, &mut headers, &RequestBody::None, &AuthConfig::Bearer { token: "tok123".into() }).unwrap();
+        apply_auth(&Method::GET, &mut url, &mut headers, &RequestBody::None, &AuthConfig::Bearer { token: "tok123".into(), prefix: crate::model::auth::default_bearer_prefix() }).unwrap();
         assert_eq!(headers, vec![("Authorization".to_string(), "Bearer tok123".to_string())]);
+    }
+
+    #[test]
+    fn apply_auth_bearer_honors_custom_and_empty_prefix() {
+        let mut url = Url::parse("https://example.com").unwrap();
+        let mut headers = no_headers();
+        apply_auth(&Method::GET, &mut url, &mut headers, &RequestBody::None, &AuthConfig::Bearer { token: "tok".into(), prefix: "Token".into() }).unwrap();
+        assert_eq!(headers, vec![("Authorization".to_string(), "Token tok".to_string())]);
+
+        let mut headers = no_headers();
+        apply_auth(&Method::GET, &mut url, &mut headers, &RequestBody::None, &AuthConfig::Bearer { token: "tok".into(), prefix: String::new() }).unwrap();
+        assert_eq!(headers, vec![("Authorization".to_string(), "tok".to_string())]);
     }
 
     #[test]
@@ -803,7 +815,7 @@ mod tests {
             query: vec![],
             body: RequestBody::None,
             options: RequestOptions::default(),
-            auth: AuthConfig::Bearer { token: "test-token-123".into() },
+            auth: AuthConfig::Bearer { token: "test-token-123".into(), prefix: crate::model::auth::default_bearer_prefix() },
         };
         let resp = send(req, None, None).await.unwrap();
         assert_eq!(resp.status, 200);

@@ -26,6 +26,7 @@ import type {
   HistoryFilter,
   ImportFormat,
   ImportedNode,
+  ImportPlacement,
   ImportPreview,
   ImportReport,
   MockRule,
@@ -36,6 +37,7 @@ import type {
   Plugin,
   PluginInput,
   PluginKind,
+  RequestAuth,
   RestoreReport,
   SavedRequest,
   SavedRequestInput,
@@ -194,10 +196,18 @@ export const ipc = {
     parentId: string | null,
     root: ImportedNode,
     mode: ConflictMode,
-  ) => invoke<ImportReport>("apply_collection_import", { workspaceId, parentId, root, mode }),
+    placement: ImportPlacement,
+  ) =>
+    invoke<ImportReport>("apply_collection_import", { workspaceId, parentId, root, mode, placement }),
   exportCollection: (collectionId: string, target: { format: ExportFormat } | { pluginId: string }) =>
     invoke<string>("export_collection", {
       collectionId,
+      format: "format" in target ? target.format : null,
+      pluginId: "pluginId" in target ? target.pluginId : null,
+    }),
+  exportRequest: (requestId: string, target: { format: ExportFormat } | { pluginId: string }) =>
+    invoke<string>("export_request", {
+      requestId,
       format: "format" in target ? target.format : null,
       pluginId: "pluginId" in target ? target.pluginId : null,
     }),
@@ -305,9 +315,10 @@ export const ipc = {
     workspaceId: string,
     collectionId: string | null,
     requestId: string | null,
+    draftAuth: RequestAuth | null,
     target: CodegenTarget,
     options: CodegenOptions,
-  ) => invoke<string>("generate_code", { req, workspaceId, collectionId, requestId, target, options }),
+  ) => invoke<string>("generate_code", { req, workspaceId, collectionId, requestId, draftAuth, target, options }),
 
   // GraphQL schema introspection — a genuine live fetch (real auth/transport),
   // but not a `send_request` call: skips scripts/history, see commands/graphql.rs.

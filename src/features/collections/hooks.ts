@@ -3,7 +3,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc";
 import { triggerLiveSyncIfEnabled } from "../../lib/liveSync";
-import type { AuthConfig, SavedRequestInput } from "../../lib/types";
+import type {
+  AuthConfig,
+  ConflictMode,
+  ImportPlacement,
+  ImportedNode,
+  SavedRequestInput,
+} from "../../lib/types";
 
 export const collectionKeys = {
   all: (workspaceId: string) => ["collections", workspaceId] as const,
@@ -172,11 +178,49 @@ export function useDeleteRequest(collectionId: string | undefined) {
 export function useMoveRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, collectionId }: { id: string; collectionId: string }) => ipc.moveRequest(id, collectionId),
+    mutationFn: ({
+      id,
+      collectionId,
+    }: {
+      id: string;
+      collectionId: string;
+      fromCollectionId?: string;
+    }) => ipc.moveRequest(id, collectionId),
     onSuccess: (saved, vars) => {
       qc.invalidateQueries({ queryKey: requestKeys.list(saved.collectionId) });
+      if (vars.fromCollectionId && vars.fromCollectionId !== saved.collectionId) {
+        qc.invalidateQueries({ queryKey: requestKeys.list(vars.fromCollectionId) });
+      }
       qc.invalidateQueries({ queryKey: requestKeys.one(vars.id) });
       triggerLiveSyncIfEnabled(qc);
+    },
+  });
+}
+
+export function useApplyCollectionImport(workspaceId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      parentId,
+      root,
+      mode,
+      placement,
+    }: {
+      parentId: string | null;
+      root: ImportedNode;
+      mode: ConflictMode;
+      placement: ImportPlacement;
+    }) => ipc.applyCollectionImport(workspaceId as string, parentId, root, mode, placement),
+    onSuccess: (_report, vars) => {
+      if (workspaceId) {
+        qc.invalidateQueries({ queryKey: collectionKeys.all(workspaceId) });
+        qc.invalidateQueries({ queryKey: ["search", workspaceId] });
+      }
+      if (vars.parentId) {
+        qc.invalidateQueries({ queryKey: requestKeys.list(vars.parentId) });
+      }
+      qc.invalidateQueries({ queryKey: ["requests"] });
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }

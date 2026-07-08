@@ -237,7 +237,7 @@ mod tests {
         let mut conn = crate::store::db::open_in_memory().unwrap();
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
         let c = crate::store::collections::create(&conn, &ws.id, None, "Secret Collection", None).unwrap();
-        crate::store::collections::update_auth(&conn, &c.id, AuthConfig::Bearer { token: "very-real-token".into() }).unwrap();
+        crate::store::collections::update_auth(&conn, &c.id, AuthConfig::Bearer { token: "very-real-token".into(), prefix: crate::model::auth::default_bearer_prefix() }).unwrap();
         (conn, ws.id)
     }
 
@@ -288,7 +288,7 @@ mod tests {
 
         let owner = crate::auth::owner_key("collection", &roots[0].id);
         let real = crate::auth::hydrate(&owner, roots[0].auth.clone()).unwrap();
-        assert_eq!(real, AuthConfig::Bearer { token: "very-real-token".into() });
+        assert_eq!(real, AuthConfig::Bearer { token: "very-real-token".into(), prefix: crate::model::auth::default_bearer_prefix() });
     }
 
     #[test]

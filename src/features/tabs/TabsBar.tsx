@@ -2,7 +2,13 @@
 //! and the debounced flush of the live draft back to its DB row; the
 //! bootstrap-on-empty and active-tab-load sync live in `useTabSync`.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import {
+  beginTabDrag,
+  clearTabDrag,
+  finishTabDrag,
+  resolveTabIndex,
+} from "../collections/dragState";
 import { MoreHorizontal, Plus, X } from "lucide-react";
 import { useRegisterCommands } from "../../lib/commands";
 import { defaultRequest } from "../../lib/http";
@@ -105,9 +111,9 @@ export function TabsBar() {
   });
 
   const dragIndex = useRef<number | null>(null);
-  function onDrop(toIndex: number) {
-    const fromIndex = dragIndex.current;
-    dragIndex.current = null;
+  function onDrop(e: DragEvent, toIndex: number) {
+    const fromIndex = resolveTabIndex(e, dragIndex);
+    clearTabDrag(dragIndex);
     if (fromIndex === null || fromIndex === toIndex) return;
     const ids = tabs.map((t) => t.id);
     const [moved] = ids.splice(fromIndex, 1);
@@ -141,11 +147,10 @@ export function TabsBar() {
               e.stopPropagation();
               closeActiveTab(tab.id);
             }}
-            onDragStart={() => {
-              dragIndex.current = index;
-            }}
+            onDragStart={(e) => beginTabDrag(e, index, dragIndex)}
+            onDragEnd={(e) => finishTabDrag(dragIndex, e)}
             onDragOver={(e) => e.preventDefault()}
-            onDrop={() => onDrop(index)}
+            onDrop={(e) => onDrop(e, index)}
           />
         ))}
       </div>
@@ -175,6 +180,7 @@ function TabChip({
   onRename,
   onClose,
   onDragStart,
+  onDragEnd,
   onDragOver,
   onDrop,
 }: {
@@ -185,9 +191,10 @@ function TabChip({
   onSelect: () => void;
   onRename: (title: string) => void;
   onClose: (e: React.MouseEvent) => void;
-  onDragStart: () => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: () => void;
+  onDragStart: (e: DragEvent) => void;
+  onDragEnd: (e: DragEvent) => void;
+  onDragOver: (e: DragEvent) => void;
+  onDrop: (e: DragEvent) => void;
 }) {
   const title = isActive ? liveTitle : tab.title;
   const method = isActive ? liveMethod : tab.draft.method;
@@ -204,6 +211,7 @@ function TabChip({
     <div
       draggable={!editing}
       onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onClick={onSelect}

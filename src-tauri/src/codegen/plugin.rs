@@ -59,7 +59,7 @@ mod tests {
         let req = HttpRequest {
             method: "GET".into(),
             url: "https://api.example.com/items".into(),
-            auth: AuthConfig::Bearer { token: "real-secret-token".into() },
+            auth: AuthConfig::Bearer { token: "real-secret-token".into(), prefix: crate::model::auth::default_bearer_prefix() },
             ..Default::default()
         };
         let options = CodegenOptions::default();

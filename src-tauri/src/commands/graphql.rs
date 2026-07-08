@@ -127,6 +127,7 @@ pub async fn introspect_graphql_schema(
     crate::vars::interpolate_request(&mut req, &resolved.values);
 
     req.auth = resolve_auth(&state, collection_id.as_deref(), request_id.as_deref()).await?;
+    crate::vars::interpolate_auth(&mut req.auth, &resolved.values);
 
     let transport = {
         let conn = state.db.lock().unwrap();

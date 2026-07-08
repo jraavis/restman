@@ -2,13 +2,13 @@
 //! collection, and the recursive tree of collections/folders/requests below
 //! it. Replaces the old "Coming in Phase 2." placeholder in `Sidebar`.
 
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { ArrowDownUp, ChevronDown, FolderPlus, Loader2, Search, Upload } from "lucide-react";
 import { HTTP_METHODS } from "../../lib/methods";
 import { useActiveWorkspace } from "../workspaces/hooks";
 import { useCollections, useCreateCollection, useMoveCollection, useTags } from "./hooks";
 import { childrenOf, type SortMode } from "./tree";
-import type { DragItem } from "./dragState";
+import { clearDrag, resolveDragItem, type DragItem } from "./dragState";
 import { CollectionNode } from "./CollectionNode";
 import { ImportDialog } from "./ImportDialog";
 import { SearchResults } from "./SearchResults";
@@ -58,9 +58,9 @@ export function CollectionsPanel() {
   // Dropping on empty space below the tree (i.e. not on any row, which would
   // have already stopped propagation) moves a dragged collection to the top
   // level. Requests can't live at workspace root, so those drops are no-ops.
-  function handleDropOnRoot() {
-    const drag = dragRef.current;
-    dragRef.current = null;
+  function handleDropOnRoot(e: DragEvent) {
+    const drag = resolveDragItem(e, dragRef);
+    clearDrag(dragRef);
     if (!drag || drag.kind !== "collection" || drag.parentId === null) return;
     moveCollection.mutate({ id: drag.id, newParentId: null });
   }

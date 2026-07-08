@@ -7,23 +7,23 @@ describe("authOptionValue", () => {
   });
 
   it("is the concrete type for an own auth", () => {
-    expect(authOptionValue({ mode: "own", type: "bearer", token: "tok" })).toBe("bearer");
+    expect(authOptionValue({ mode: "own", type: "bearer", token: "tok", prefix: "Bearer" })).toBe("bearer");
   });
 });
 
 describe("applyAuthOption", () => {
   it("switches to inherit regardless of the current type", () => {
-    const current: RequestAuth = { mode: "own", type: "bearer", token: "tok" };
+    const current: RequestAuth = { mode: "own", type: "bearer", token: "tok", prefix: "Bearer" };
     expect(applyAuthOption(current, "inherit")).toEqual({ mode: "inherit" });
   });
 
   it("starts a freshly-selected type empty rather than carrying over fields", () => {
-    const current: RequestAuth = { mode: "own", type: "bearer", token: "tok" };
+    const current: RequestAuth = { mode: "own", type: "bearer", token: "tok", prefix: "Bearer" };
     expect(applyAuthOption(current, "basic")).toEqual({ mode: "own", type: "basic", username: "", password: "" });
   });
 
   it("re-selecting the type already in effect is a no-op, preserving its fields", () => {
-    const current: RequestAuth = { mode: "own", type: "bearer", token: "tok" };
+    const current: RequestAuth = { mode: "own", type: "bearer", token: "tok", prefix: "Bearer" };
     expect(applyAuthOption(current, "bearer")).toBe(current);
   });
 

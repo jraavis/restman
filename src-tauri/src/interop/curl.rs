@@ -148,7 +148,7 @@ pub fn parse(content: &str) -> AppResult<ImportPreview> {
         headers.iter().position(|h| h.name.eq_ignore_ascii_case("authorization") && h.value.starts_with("Bearer "))
     {
         let token = headers.remove(idx).value.trim_start_matches("Bearer ").to_string();
-        auth = RequestAuth::Own(AuthConfig::Bearer { token });
+        auth = RequestAuth::Own(AuthConfig::Bearer { token, prefix: crate::model::auth::default_bearer_prefix() });
     }
 
     if data_pieces.iter().any(|d| d.starts_with('@')) {
@@ -371,8 +371,8 @@ fn build_curl_block(req: &ImportedRequest) -> String {
             AuthConfig::Basic { username, password } => {
                 lines.push(format!("  -u {}", quote(&format!("{username}:{password}"))));
             }
-            AuthConfig::Bearer { token } => {
-                headers.push(HeaderEntry { name: "Authorization".into(), value: format!("Bearer {token}"), enabled: true });
+            AuthConfig::Bearer { token, prefix } => {
+                headers.push(HeaderEntry { name: "Authorization".into(), value: crate::model::auth::bearer_header_value(prefix, token), enabled: true });
             }
             AuthConfig::ApiKey { key, value, location } if *location == ApiKeyLocation::Header => {
                 headers.push(HeaderEntry { name: key.clone(), value: value.clone(), enabled: true });
@@ -500,7 +500,7 @@ mod tests {
                 HeaderEntry { name: "Content-Type".into(), value: "application/json".into(), enabled: true },
             ]
         );
-        assert_eq!(req.auth, RequestAuth::Own(AuthConfig::Bearer { token: "abc123".into() }));
+        assert_eq!(req.auth, RequestAuth::Own(AuthConfig::Bearer { token: "abc123".into(), prefix: crate::model::auth::default_bearer_prefix() }));
         assert_eq!(req.body, RequestBody::Json("{\"name\":\"Fido\"}".into()));
         assert_eq!(req.options.timeout_secs, 15);
         assert_eq!(req.options.max_redirects, 3);
@@ -558,7 +558,7 @@ mod tests {
             query: vec![KeyValue { key: "limit".into(), value: "5".into(), enabled: true }],
             body: RequestBody::None,
             options: RequestOptions::default(),
-            auth: RequestAuth::Own(AuthConfig::Bearer { token: "tok".into() }),
+            auth: RequestAuth::Own(AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() }),
             pre_request_script: String::new(),
             post_response_script: String::new(),
             ..Default::default()

@@ -149,7 +149,10 @@ pub async fn execute_one_request(
         crate::auth::hydrate(&owner, masked)
     };
     match auth_result {
-        Ok(auth) => req.auth = auth,
+        Ok(auth) => {
+            req.auth = auth;
+            vars::interpolate_auth(&mut req.auth, &resolved.values);
+        }
         Err(e) => {
             return Ok(RequestRunResult {
                 status: None,

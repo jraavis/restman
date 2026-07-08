@@ -137,6 +137,7 @@ pub fn run() {
             commands::preview_import_bruno_directory,
             commands::apply_collection_import,
             commands::export_collection,
+            commands::export_request,
             commands::preview_environment_import,
             commands::apply_environment_import,
             commands::export_environment,

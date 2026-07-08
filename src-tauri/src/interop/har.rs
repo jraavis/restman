@@ -108,7 +108,7 @@ fn parse_request(req: &Value, warnings: &mut Vec<String>) -> ImportedRequest {
                 // HAR) an auth section; preserving the header matches what
                 // the recording actually sent. Remove only when Basic, since
                 // we represent Basic as -u-style auth, not as a header.
-                RequestAuth::Own(AuthConfig::Bearer { token: token.to_string() })
+                RequestAuth::Own(AuthConfig::Bearer { token: token.to_string(), prefix: crate::model::auth::default_bearer_prefix() })
             } else {
                 RequestAuth::Inherit
             }
@@ -315,8 +315,8 @@ fn effective_parts(req: &ImportedRequest) -> (Vec<(String, String)>, Vec<(String
     let mut headers: Vec<(String, String)> = req.headers.iter().filter(|h| h.enabled).map(|h| (h.name.clone(), h.value.clone())).collect();
     let mut query: Vec<(String, String)> = req.query.iter().filter(|q| q.enabled).map(|q| (q.key.clone(), q.value.clone())).collect();
     match &req.auth {
-        RequestAuth::Own(AuthConfig::Bearer { token }) => {
-            headers.push(("Authorization".into(), format!("Bearer {token}")));
+        RequestAuth::Own(AuthConfig::Bearer { token, prefix }) => {
+            headers.push(("Authorization".into(), crate::model::auth::bearer_header_value(prefix, token)));
         }
         RequestAuth::Own(AuthConfig::Basic { username, password }) => {
             let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, format!("{username}:{password}"));
@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(post.method, "POST");
         assert_eq!(post.url, "https://api.example.com/items");
         assert_eq!(post.query, vec![KeyValue { key: "limit".into(), value: "5".into(), enabled: true }]);
-        assert_eq!(post.auth, RequestAuth::Own(AuthConfig::Bearer { token: "abc123".into() }));
+        assert_eq!(post.auth, RequestAuth::Own(AuthConfig::Bearer { token: "abc123".into(), prefix: crate::model::auth::default_bearer_prefix() }));
         assert_eq!(post.body, RequestBody::Json("{\"name\":\"Fido\"}".into()));
         assert_eq!(post.name, "POST /items");
 

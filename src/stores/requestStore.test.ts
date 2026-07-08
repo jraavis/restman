@@ -51,7 +51,7 @@ describe("requestStore", () => {
       collectionId: "col-1",
       title: "Loaded",
       draft,
-      auth: { mode: "own", type: "bearer", token: "tok" },
+      auth: { mode: "own", type: "bearer", token: "tok", prefix: "Bearer" },
     });
     const s = useRequestStore.getState();
     expect(s.activeTabId).toBe("tab-1");
@@ -59,7 +59,7 @@ describe("requestStore", () => {
     expect(s.collectionId).toBe("col-1");
     expect(s.title).toBe("Loaded");
     expect(s.request.url).toBe("https://loaded.test");
-    expect(s.auth).toEqual({ mode: "own", type: "bearer", token: "tok" });
+    expect(s.auth).toEqual({ mode: "own", type: "bearer", token: "tok", prefix: "Bearer" });
     expect(s.error).toBeNull();
   });
 

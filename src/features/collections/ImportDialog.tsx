@@ -9,12 +9,15 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, CheckCircle2, ChevronRight, File, Folder, FolderOpen, Upload } from "lucide-react";
 import { ipc } from "../../lib/ipc";
 import { ModalPortal } from "../../components/ModalPortal";
+import { useApplyEnvironmentImport } from "../environments/hooks";
 import { usePlugins } from "../plugins/hooks";
+import { useApplyCollectionImport } from "./hooks";
 import type {
   ConflictMode,
   EnvironmentImportReport,
   EnvironmentPreview,
   ImportFormat,
+  ImportPlacement,
   ImportedNode,
   ImportPreview,
   ImportReport,
@@ -35,7 +38,11 @@ function optionValueToSource(value: string): ImportSource {
 interface ImportDialogProps {
   workspaceId: string;
   parentId: string | null;
+  /** Display name of `parentId` — used in the placement picker label. */
+  parentName?: string;
   onClose: () => void;
+  /** Called after a successful collection import so the sidebar can react. */
+  onImported?: () => void;
   /** When opened from the Environments panel, preselect "environment". */
   defaultKind?: Kind;
 }
@@ -104,19 +111,55 @@ const COLLECTION_FORMATS: { value: ImportFormat; label: string; accept: string; 
   },
 ];
 
-export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "collection" }: ImportDialogProps) {
+function defaultPlacement(source: ImportSource): ImportPlacement {
+  if (source.kind === "plugin") return "as_subfolder";
+  switch (source.format) {
+    case "curl":
+    case "http_file":
+    case "har":
+    case "bruno":
+      return "into_folder";
+    default:
+      return "as_subfolder";
+  }
+}
+
+export function ImportDialog({
+  workspaceId,
+  parentId,
+  parentName,
+  onClose,
+  onImported,
+  defaultKind = "collection",
+}: ImportDialogProps) {
   const [kind, setKind] = useState<Kind>(defaultKind);
   const [step, setStep] = useState<Step>({ phase: "input" });
   const [source, setSource] = useState<ImportSource>({ kind: "native", format: "postman" });
+  const [placement, setPlacement] = useState<ImportPlacement>(() => defaultPlacement({ kind: "native", format: "postman" }));
+  // Once the user picks a placement by hand, format/directory changes stop
+  // resetting it out from under them.
+  const [placementTouched, setPlacementTouched] = useState(false);
   const [mode, setMode] = useState<ConflictMode>("skip");
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { data: allImportPlugins } = usePlugins(workspaceId, "import");
   const importPlugins = allImportPlugins?.filter((p) => p.enabled);
+  const applyCollectionImport = useApplyCollectionImport(workspaceId);
+  const applyEnvironmentImport = useApplyEnvironmentImport(workspaceId);
 
   const activeFormat = source.kind === "native" ? COLLECTION_FORMATS.find((f) => f.value === source.format) : undefined;
   const activePlugin = source.kind === "plugin" ? importPlugins?.find((p) => p.id === source.pluginId) : undefined;
+
+  function onSourceChange(next: ImportSource) {
+    setSource(next);
+    if (!placementTouched) setPlacement(defaultPlacement(next));
+  }
+
+  function onPlacementChange(next: ImportPlacement) {
+    setPlacement(next);
+    setPlacementTouched(true);
+  }
 
   async function loadContent(content: string) {
     if (!content.trim()) return;
@@ -153,6 +196,8 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
     setBusy(true);
     try {
       const preview = await ipc.previewImportBrunoDirectory(dir);
+      // A directory is a whole collection tree, not a lone request.
+      if (!placementTouched) setPlacement("as_subfolder");
       setStep({ phase: "preview", preview });
     } catch (e) {
       setError(typeof e === "string" ? e : String(e));
@@ -166,10 +211,20 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
     setError(null);
     try {
       if (step.phase === "preview") {
-        const report = await ipc.applyCollectionImport(workspaceId, parentId, step.preview.root, mode);
+        const report = await applyCollectionImport.mutateAsync({
+          parentId,
+          root: step.preview.root,
+          mode,
+          placement: parentId ? placement : "as_subfolder",
+        });
+        onImported?.();
         setStep({ phase: "done", report });
       } else if (step.phase === "env_preview") {
-        const report = await ipc.applyEnvironmentImport(workspaceId, parentId, step.preview, overwriteExisting);
+        const report = await applyEnvironmentImport.mutateAsync({
+          collectionId: parentId,
+          preview: step.preview,
+          overwriteExisting,
+        });
         setStep({ phase: "env_done", report });
       }
     } catch (e) {
@@ -221,7 +276,7 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
                     Format
                     <select
                       value={sourceToOptionValue(source)}
-                      onChange={(e) => setSource(optionValueToSource(e.target.value))}
+                      onChange={(e) => onSourceChange(optionValueToSource(e.target.value))}
                       className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
                     >
                       <optgroup label="Formats">
@@ -245,6 +300,29 @@ export function ImportDialog({ workspaceId, parentId, onClose, defaultKind = "co
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {activeFormat?.blurb ?? `Import using the "${activePlugin?.name ?? ""}" plugin.`}
                   </p>
+                  {parentId && (
+                    <fieldset className="flex flex-col gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                      <legend className="mb-0.5 font-medium">Placement</legend>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="import-placement"
+                          checked={placement === "into_folder"}
+                          onChange={() => onPlacementChange("into_folder")}
+                        />
+                        Add to {parentName ? `"${parentName}"` : "this folder"}
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="import-placement"
+                          checked={placement === "as_subfolder"}
+                          onChange={() => onPlacementChange("as_subfolder")}
+                        />
+                        Import as subfolder
+                      </label>
+                    </fieldset>
+                  )}
                   <input
                     type="file"
                     accept={activeFormat?.accept ?? "*/*"}

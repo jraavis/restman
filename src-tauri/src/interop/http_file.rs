@@ -217,7 +217,7 @@ fn collapse_auth(headers: Vec<HeaderEntry>) -> (Vec<HeaderEntry>, AuthConfig) {
             let value = headers[idx].value.clone();
             headers.remove(idx);
             if let Some(token) = value.strip_prefix("Bearer ") {
-                AuthConfig::Bearer { token: token.to_string() }
+                AuthConfig::Bearer { token: token.to_string(), prefix: crate::model::auth::default_bearer_prefix() }
             } else if let Some(rest) = value.strip_prefix("Basic ") {
                 let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, rest).unwrap_or_default();
                 let creds = String::from_utf8_lossy(&decoded);
@@ -325,7 +325,7 @@ https://api.example.com/health
         assert_eq!(list.query, vec![KeyValue { key: "limit".into(), value: "5".into(), enabled: true }]);
         assert!(list.headers.iter().any(|h| h.name == "Accept"));
         // Authorization header was collapsed into Bearer auth (token interpolated).
-        assert_eq!(list.auth, RequestAuth::Own(AuthConfig::Bearer { token: "abc123".into() }));
+        assert_eq!(list.auth, RequestAuth::Own(AuthConfig::Bearer { token: "abc123".into(), prefix: crate::model::auth::default_bearer_prefix() }));
         assert!(!list.headers.iter().any(|h| h.name.eq_ignore_ascii_case("authorization")));
 
         let create = &preview.root.requests[1];

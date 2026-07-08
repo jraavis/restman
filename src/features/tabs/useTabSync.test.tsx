@@ -88,7 +88,7 @@ describe("useTabSync", () => {
     });
     vi.mocked(ipc.listTabs).mockResolvedValue([tabA]);
     vi.mocked(ipc.getRequest).mockResolvedValue(
-      makeSavedRequest({ collectionId: "col-1", auth: { mode: "own", type: "bearer", token: "tok" } }),
+      makeSavedRequest({ collectionId: "col-1", auth: { mode: "own", type: "bearer", token: "tok", prefix: "Bearer" } }),
     );
 
     renderWithClient("ws-1");
@@ -98,7 +98,7 @@ describe("useTabSync", () => {
     });
     expect(useRequestStore.getState().collectionId).toBe("col-1");
     expect(useRequestStore.getState().request.url).toBe("https://a.test");
-    expect(useRequestStore.getState().auth).toEqual({ mode: "own", type: "bearer", token: "tok" });
+    expect(useRequestStore.getState().auth).toEqual({ mode: "own", type: "bearer", token: "tok", prefix: "Bearer" });
   });
 
   it("does not reload — and so does not clobber an in-progress edit — when a refetch returns the same active tab id", async () => {

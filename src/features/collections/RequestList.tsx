@@ -16,7 +16,7 @@ import {
 } from "./hooks";
 import { useOpenRequest } from "./useOpenRequest";
 import { useRequestStore } from "../../stores/requestStore";
-import type { DragRef } from "./dragState";
+import { beginDrag, clearDrag, finishDrag, resolveDragItem, type DragRef } from "./dragState";
 import type { SavedRequest } from "../../lib/types";
 import { sortRequests, type SortMode } from "./tree";
 import { RequestRow } from "./RequestRow";
@@ -44,35 +44,45 @@ export function RequestList({
 
   // Dropped on the list itself (not on a specific row, which stops
   // propagation first) — append into this collection from elsewhere.
-  function handleDropOnList() {
-    const drag = dragRef.current;
-    dragRef.current = null;
+  function handleDropOnList(e: DragEvent) {
+    const drag = resolveDragItem(e, dragRef);
     if (!drag || drag.kind !== "request" || drag.collectionId === collectionId) return;
-    moveRequest.mutate({ id: drag.id, collectionId });
+    e.stopPropagation();
+    clearDrag(dragRef);
+    moveRequest.mutate({
+      id: drag.id,
+      collectionId,
+      fromCollectionId: drag.collectionId,
+    });
   }
 
   // Dropped directly on `target` — reorder if it's already in this
   // collection, otherwise move in and land at that position.
-  function handleDropOnRequest(target: SavedRequest) {
-    const drag = dragRef.current;
-    dragRef.current = null;
+  function handleDropOnRequest(e: DragEvent, target: SavedRequest) {
+    const drag = resolveDragItem(e, dragRef);
     if (!drag || drag.kind !== "request" || drag.id === target.id || !requests) return;
+    e.stopPropagation();
     if (drag.collectionId !== collectionId) {
-      moveRequest.mutate({ id: drag.id, collectionId });
+      clearDrag(dragRef);
+      moveRequest.mutate({
+        id: drag.id,
+        collectionId,
+        fromCollectionId: drag.collectionId,
+      });
       return;
     }
     const ids = requests.map((r) => r.id);
     const fromIndex = ids.indexOf(drag.id);
     const toIndex = ids.indexOf(target.id);
     if (fromIndex === -1 || toIndex === -1) return;
+    clearDrag(dragRef);
     ids.splice(fromIndex, 1);
     ids.splice(toIndex, 0, drag.id);
     reorderRequests.mutate(ids);
   }
 
   function handleDragStart(e: DragEvent, request: SavedRequest) {
-    e.stopPropagation();
-    dragRef.current = { kind: "request", id: request.id, collectionId };
+    beginDrag(e, { kind: "request", id: request.id, collectionId }, dragRef);
   }
 
   if (isLoading) {
@@ -94,11 +104,9 @@ export function RequestList({
           className="pl-6"
           draggable={sortMode === "manual"}
           onDragStart={(e) => handleDragStart(e, request)}
+          onDragEnd={(e) => finishDrag(dragRef, e)}
           onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.stopPropagation();
-            handleDropOnRequest(request);
-          }}
+          onDrop={(e) => handleDropOnRequest(e, request)}
         >
           <RequestRow
             request={request}

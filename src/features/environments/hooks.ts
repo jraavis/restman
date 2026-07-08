@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ipc } from "../../lib/ipc";
 import { triggerLiveSyncIfEnabled } from "../../lib/liveSync";
-import type { VarScope, VariableInput } from "../../lib/types";
+import type { EnvironmentPreview, VarScope, VariableInput } from "../../lib/types";
 
 export const environmentKeys = {
   all: (workspaceId: string) => ["environments", workspaceId] as const,
@@ -171,6 +171,29 @@ export function useDeleteVariable(scope: VarScope) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: variableKeys.scope(scope) });
       liveSyncIfEnvScope(qc, scope);
+    },
+  });
+}
+
+export function useApplyEnvironmentImport(workspaceId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      collectionId,
+      preview,
+      overwriteExisting,
+    }: {
+      collectionId: string | null;
+      preview: EnvironmentPreview;
+      overwriteExisting: boolean;
+    }) =>
+      ipc.applyEnvironmentImport(workspaceId as string, collectionId, preview, overwriteExisting),
+    onSuccess: () => {
+      if (workspaceId) {
+        qc.invalidateQueries({ queryKey: environmentKeys.all(workspaceId) });
+        qc.invalidateQueries({ queryKey: environmentKeys.active(workspaceId) });
+      }
+      triggerLiveSyncIfEnabled(qc, workspaceId);
     },
   });
 }

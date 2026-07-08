@@ -179,6 +179,20 @@ fn strip_unrecoverable_request_auth_masks(auth: RequestAuth) -> (RequestAuth, bo
     }
 }
 
+/// Where to place an import when the user targets an existing folder via
+/// "Import here…". Ignored when `parent_id` is `None` (workspace-root import
+/// always creates a top-level collection).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportPlacement {
+    /// Merge `root.requests` into the target folder; recurse `root.children`
+    /// as subfolders under it.
+    IntoFolder,
+    /// Create/find a child collection named `root.name` under the target.
+    #[default]
+    AsSubfolder,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictMode {
@@ -249,20 +263,30 @@ fn strip_non_http_requests(node: &ImportedNode) -> ImportedNode {
 }
 
 /// Materialize an `ImportedNode` tree under `parent_id` (`None` = workspace
-/// top level), applying `mode` at every name collision. `root` itself is
-/// placed as one collection under `parent_id` — callers that want to import
-/// "into" an existing collection should pass that collection's id as
-/// `parent_id` and `root` becomes a new child of it (or is merged into an
-/// existing same-name child, per `mode`).
+/// top level), applying `mode` at every name collision. When `parent_id` is
+/// set and `placement` is `IntoFolder`, `root.requests` land directly in the
+/// target folder and `root.children` become subfolders under it; otherwise
+/// `root` is placed as one collection under `parent_id` (or at workspace
+/// root when `parent_id` is `None`).
 pub fn apply_import(
     conn: &Connection,
     workspace_id: &str,
     parent_id: Option<&str>,
     root: &ImportedNode,
     mode: ConflictMode,
+    placement: ImportPlacement,
 ) -> AppResult<ImportReport> {
     let mut report = ImportReport::default();
-    apply_node(conn, workspace_id, parent_id, root, mode, &mut report)?;
+    if parent_id.is_some() && placement == ImportPlacement::IntoFolder {
+        let target = store::collections::get(conn, parent_id.unwrap())?;
+        apply_collection_auth(conn, &target.name, &target.id, root.auth.clone(), &mut report)?;
+        apply_requests(conn, &target.id, &root.requests, mode, &mut report)?;
+        for child in &root.children {
+            apply_node(conn, workspace_id, Some(target.id.as_str()), child, mode, &mut report)?;
+        }
+    } else {
+        apply_node(conn, workspace_id, parent_id, root, mode, &mut report)?;
+    }
     Ok(report)
 }
 
@@ -289,19 +313,48 @@ fn apply_node(
                 node.description.as_deref(),
             )?;
             report.created_collections += 1;
-            let (auth, masked) = strip_unrecoverable_masks(node.auth.clone());
-            if masked {
-                report.warnings.push(format!(
-                    "\"{}\": secret was already masked in the imported file and could not be recovered — re-enter it",
-                    node.name
-                ));
-            }
-            store::collections::update_auth(conn, &created.id, auth)?
+            apply_collection_auth(conn, &node.name, &created.id, node.auth.clone(), report)?;
+            created
         }
     };
 
-    let existing_requests = store::requests::list_by_collection(conn, &collection.id)?;
-    for req in &node.requests {
+    apply_requests(conn, &collection.id, &node.requests, mode, report)?;
+
+    for child in &node.children {
+        apply_node(conn, workspace_id, Some(collection.id.as_str()), child, mode, report)?;
+    }
+    Ok(())
+}
+
+fn apply_collection_auth(
+    conn: &Connection,
+    label: &str,
+    collection_id: &str,
+    auth: AuthConfig,
+    report: &mut ImportReport,
+) -> AppResult<()> {
+    if auth == AuthConfig::None {
+        return Ok(());
+    }
+    let (auth, masked) = strip_unrecoverable_masks(auth);
+    if masked {
+        report.warnings.push(format!(
+            "\"{label}\": secret was already masked in the imported file and could not be recovered — re-enter it"
+        ));
+    }
+    store::collections::update_auth(conn, collection_id, auth)?;
+    Ok(())
+}
+
+fn apply_requests(
+    conn: &Connection,
+    collection_id: &str,
+    requests: &[ImportedRequest],
+    mode: ConflictMode,
+    report: &mut ImportReport,
+) -> AppResult<()> {
+    let existing_requests = store::requests::list_by_collection(conn, collection_id)?;
+    for req in requests {
         let collision = existing_requests.iter().find(|r| r.name == req.name);
         let (auth, masked) = strip_unrecoverable_request_auth_masks(req.auth.clone());
         let input = SavedRequestInput {
@@ -321,7 +374,7 @@ fn apply_node(
         let mut persisted = false;
         match collision {
             None => {
-                store::requests::create(conn, &collection.id, &input)?;
+                store::requests::create(conn, collection_id, &input)?;
                 report.created_requests += 1;
                 persisted = true;
             }
@@ -353,7 +406,7 @@ fn apply_node(
                     let mut disambiguated = input;
                     disambiguated.name =
                         unique_request_name(&existing_requests, &disambiguated.name);
-                    store::requests::create(conn, &collection.id, &disambiguated)?;
+                    store::requests::create(conn, collection_id, &disambiguated)?;
                     report.created_requests += 1;
                     persisted = true;
                 }
@@ -365,10 +418,6 @@ fn apply_node(
                 req.name
             ));
         }
-    }
-
-    for child in &node.children {
-        apply_node(conn, workspace_id, Some(collection.id.as_str()), child, mode, report)?;
     }
     Ok(())
 }
@@ -393,6 +442,32 @@ fn unique_request_name(existing: &[crate::model::SavedRequest], base: &str) -> S
 /// which is already mask-on-write — see module doc.
 pub fn collect(conn: &Connection, collection_id: &str) -> AppResult<ImportedNode> {
     collect_with_secrets(conn, collection_id, false)
+}
+
+/// Read a single saved request back out as a one-request `ImportedNode` tree,
+/// for per-request export.
+pub fn collect_request(conn: &Connection, request_id: &str) -> AppResult<ImportedNode> {
+    let req = store::requests::get(conn, request_id)?;
+    Ok(ImportedNode {
+        name: req.name.clone(),
+        description: None,
+        auth: AuthConfig::None,
+        requests: vec![ImportedRequest {
+            name: req.name,
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            query: req.query,
+            body: req.body,
+            options: req.options,
+            auth: req.auth,
+            pre_request_script: req.pre_request_script,
+            post_response_script: req.post_response_script,
+            kind: req.kind,
+            stream_config: req.stream_config,
+        }],
+        children: vec![],
+    })
 }
 
 /// `collect`, with an opt-in knob to hydrate real auth secrets from the
@@ -467,7 +542,7 @@ mod tests {
         ImportedNode {
             name: "Root".into(),
             description: Some("desc".into()),
-            auth: AuthConfig::Bearer { token: "tok".into() },
+            auth: AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() },
             requests: vec![leaf_request("Get thing")],
             children: vec![ImportedNode {
                 name: "Sub".into(),
@@ -482,7 +557,7 @@ mod tests {
         let mut conn = crate::store::db::open_in_memory().unwrap();
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
 
-        let report = apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip).unwrap();
+        let report = apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip, ImportPlacement::AsSubfolder).unwrap();
         assert_eq!(report.created_collections, 2); // Root + Sub
         assert_eq!(report.created_requests, 2);
 
@@ -497,7 +572,7 @@ mod tests {
             ImportedNode {
                 name: "Root".into(),
                 description: Some("desc".into()),
-                auth: AuthConfig::Bearer { token: crate::model::variable::SECRET_MASK.into() },
+                auth: AuthConfig::Bearer { token: crate::model::variable::SECRET_MASK.into(), prefix: crate::model::auth::default_bearer_prefix() },
                 requests: vec![leaf_request("Get thing")],
                 children: vec![ImportedNode {
                     name: "Sub".into(),
@@ -513,10 +588,10 @@ mod tests {
         let mut conn = crate::store::db::open_in_memory().unwrap();
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
 
-        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip).unwrap();
+        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip, ImportPlacement::AsSubfolder).unwrap();
         let mut second = sample_tree();
         second.requests[0].url = "https://changed.test".into();
-        let report = apply_import(&conn, &ws.id, None, &second, ConflictMode::Skip).unwrap();
+        let report = apply_import(&conn, &ws.id, None, &second, ConflictMode::Skip, ImportPlacement::AsSubfolder).unwrap();
 
         // Re-importing the same tree finds the Root/Sub collections and both
         // requests already present by name; nothing new is created.
@@ -534,10 +609,10 @@ mod tests {
         let mut conn = crate::store::db::open_in_memory().unwrap();
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
 
-        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip).unwrap();
+        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip, ImportPlacement::AsSubfolder).unwrap();
         let mut second = sample_tree();
         second.requests[0].url = "https://changed.test".into();
-        let report = apply_import(&conn, &ws.id, None, &second, ConflictMode::Overwrite).unwrap();
+        let report = apply_import(&conn, &ws.id, None, &second, ConflictMode::Overwrite, ImportPlacement::AsSubfolder).unwrap();
 
         assert_eq!(report.overwritten, 2);
         let roots = store::collections::list_children(&conn, &ws.id, None).unwrap();
@@ -556,7 +631,7 @@ mod tests {
         let mut conn = crate::store::db::open_in_memory().unwrap();
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
 
-        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip).unwrap();
+        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip, ImportPlacement::AsSubfolder).unwrap();
         let roots = store::collections::list_children(&conn, &ws.id, None).unwrap();
         let req = store::requests::list_by_collection(&conn, &roots[0].id)
             .unwrap()
@@ -571,7 +646,7 @@ mod tests {
         // Re-import with a body added, Overwrite mode.
         let mut second = sample_tree();
         second.requests[0].body = RequestBody::Json("{\"a\":1}".into());
-        apply_import(&conn, &ws.id, None, &second, ConflictMode::Overwrite).unwrap();
+        apply_import(&conn, &ws.id, None, &second, ConflictMode::Overwrite, ImportPlacement::AsSubfolder).unwrap();
 
         let refreshed = store::tabs::get(&conn, &tab.id).unwrap();
         assert_eq!(refreshed.draft.body, RequestBody::Json("{\"a\":1}".into()), "tab draft still stale after overwrite import");
@@ -582,8 +657,8 @@ mod tests {
         let mut conn = crate::store::db::open_in_memory().unwrap();
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
 
-        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip).unwrap();
-        let report = apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Merge).unwrap();
+        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip, ImportPlacement::AsSubfolder).unwrap();
+        let report = apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Merge, ImportPlacement::AsSubfolder).unwrap();
 
         assert_eq!(report.created_requests, 2); // "Get thing (2)", "Nested req (2)"
         let roots = store::collections::list_children(&conn, &ws.id, None).unwrap();
@@ -596,14 +671,14 @@ mod tests {
         let mut conn = crate::store::db::open_in_memory().unwrap();
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
 
-        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip).unwrap();
+        apply_import(&conn, &ws.id, None, &sample_tree(), ConflictMode::Skip, ImportPlacement::AsSubfolder).unwrap();
         let roots = store::collections::list_children(&conn, &ws.id, None).unwrap();
         let stored = store::collections::get(&conn, &roots[0].id).unwrap();
         assert!(stored.auth.is_masked(), "{:?} must be masked at rest", stored.auth);
 
         let owner = crate::auth::owner_key("collection", &roots[0].id);
         let real = crate::auth::hydrate(&owner, stored.auth).unwrap();
-        assert_eq!(real, AuthConfig::Bearer { token: "tok".into() });
+        assert_eq!(real, AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() });
     }
 
     /// Postman/cURL/OpenAPI/HAR only understand HTTP — exporting a collection
@@ -652,19 +727,19 @@ mod tests {
         let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
 
         let mut tree = sample_tree();
-        tree.auth = AuthConfig::Bearer { token: crate::model::variable::SECRET_MASK.into() };
+        tree.auth = AuthConfig::Bearer { token: crate::model::variable::SECRET_MASK.into(), prefix: crate::model::auth::default_bearer_prefix() };
 
-        let report = apply_import(&conn, &ws.id, None, &tree, ConflictMode::Skip).unwrap();
+        let report = apply_import(&conn, &ws.id, None, &tree, ConflictMode::Skip, ImportPlacement::AsSubfolder).unwrap();
         assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
         assert!(report.warnings[0].contains("Root"), "{:?}", report.warnings);
 
         let roots = store::collections::list_children(&conn, &ws.id, None).unwrap();
         let stored = store::collections::get(&conn, &roots[0].id).unwrap();
-        assert_eq!(stored.auth, AuthConfig::Bearer { token: String::new() });
+        assert_eq!(stored.auth, AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() });
 
         let owner = crate::auth::owner_key("collection", &roots[0].id);
         let real = crate::auth::hydrate(&owner, stored.auth).unwrap();
-        assert_eq!(real, AuthConfig::Bearer { token: String::new() }, "must not fabricate a token from the mask");
+        assert_eq!(real, AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() }, "must not fabricate a token from the mask");
     }
 
     #[test]
@@ -675,15 +750,112 @@ mod tests {
         let mut tree = sample_tree();
         tree.auth = AuthConfig::None;
         tree.requests[0].auth =
-            RequestAuth::Own(AuthConfig::Bearer { token: crate::model::variable::SECRET_MASK.into() });
+            RequestAuth::Own(AuthConfig::Bearer { token: crate::model::variable::SECRET_MASK.into(), prefix: crate::model::auth::default_bearer_prefix() });
 
-        let report = apply_import(&conn, &ws.id, None, &tree, ConflictMode::Skip).unwrap();
+        let report = apply_import(&conn, &ws.id, None, &tree, ConflictMode::Skip, ImportPlacement::AsSubfolder).unwrap();
         assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
         assert!(report.warnings[0].contains("Get thing"), "{:?}", report.warnings);
 
         let roots = store::collections::list_children(&conn, &ws.id, None).unwrap();
         let reqs = store::requests::list_by_collection(&conn, &roots[0].id).unwrap();
         let stored = reqs.iter().find(|r| r.name == "Get thing").unwrap();
-        assert_eq!(stored.auth, RequestAuth::Own(AuthConfig::Bearer { token: String::new() }));
+        assert_eq!(stored.auth, RequestAuth::Own(AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() }));
+    }
+
+    #[test]
+    fn into_folder_placement_adds_requests_directly_to_target() {
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
+        let target = store::collections::create(&conn, &ws.id, None, "API", None).unwrap();
+
+        let curl_root = ImportedNode {
+            name: "GET /users".into(),
+            requests: vec![leaf_request("GET /users")],
+            ..Default::default()
+        };
+        let report = apply_import(
+            &conn,
+            &ws.id,
+            Some(&target.id),
+            &curl_root,
+            ConflictMode::Skip,
+            ImportPlacement::IntoFolder,
+        )
+        .unwrap();
+
+        assert_eq!(report.created_collections, 0);
+        assert_eq!(report.created_requests, 1);
+        let reqs = store::requests::list_by_collection(&conn, &target.id).unwrap();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].name, "GET /users");
+        let children = store::collections::list_children(&conn, &ws.id, Some(&target.id)).unwrap();
+        assert!(children.is_empty());
+    }
+
+    #[test]
+    fn as_subfolder_placement_creates_nested_collection() {
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
+        let target = store::collections::create(&conn, &ws.id, None, "API", None).unwrap();
+
+        let curl_root = ImportedNode {
+            name: "GET /users".into(),
+            requests: vec![leaf_request("GET /users")],
+            ..Default::default()
+        };
+        let report = apply_import(
+            &conn,
+            &ws.id,
+            Some(&target.id),
+            &curl_root,
+            ConflictMode::Skip,
+            ImportPlacement::AsSubfolder,
+        )
+        .unwrap();
+
+        assert_eq!(report.created_collections, 1);
+        assert_eq!(report.created_requests, 1);
+        assert!(store::requests::list_by_collection(&conn, &target.id).unwrap().is_empty());
+        let children = store::collections::list_children(&conn, &ws.id, Some(&target.id)).unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].name, "GET /users");
+        let reqs = store::requests::list_by_collection(&conn, &children[0].id).unwrap();
+        assert_eq!(reqs.len(), 1);
+    }
+
+    #[test]
+    fn into_folder_placement_puts_subfolders_under_target() {
+        let mut conn = crate::store::db::open_in_memory().unwrap();
+        let ws = crate::store::workspaces::ensure_default(&mut conn).unwrap();
+        let target = store::collections::create(&conn, &ws.id, None, "API", None).unwrap();
+
+        let tree = ImportedNode {
+            name: "Pet Store".into(),
+            requests: vec![leaf_request("List pets")],
+            children: vec![ImportedNode {
+                name: "Users".into(),
+                requests: vec![leaf_request("Get user")],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let report = apply_import(
+            &conn,
+            &ws.id,
+            Some(&target.id),
+            &tree,
+            ConflictMode::Skip,
+            ImportPlacement::IntoFolder,
+        )
+        .unwrap();
+
+        assert_eq!(report.created_collections, 1); // Users subfolder only
+        assert_eq!(report.created_requests, 2);
+        let root_reqs = store::requests::list_by_collection(&conn, &target.id).unwrap();
+        assert_eq!(root_reqs.len(), 1);
+        assert_eq!(root_reqs[0].name, "List pets");
+        let children = store::collections::list_children(&conn, &ws.id, Some(&target.id)).unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].name, "Users");
     }
 }

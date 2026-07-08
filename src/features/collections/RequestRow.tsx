@@ -3,10 +3,15 @@
 //! via a small hover-revealed context menu.
 
 import { useState } from "react";
-import { Cable, Copy, MoreHorizontal, Network, Pencil, Radio, Tags, Trash2 } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { Cable, Copy, Download, MoreHorizontal, Network, Pencil, Radio, Tags, Trash2 } from "lucide-react";
 import { methodBadgeClasses } from "../../lib/methods";
+import { textToBase64 } from "../../lib/encoding";
+import { ipc } from "../../lib/ipc";
 import { useDismissable } from "../../lib/useDismissable";
-import type { SavedRequest } from "../../lib/types";
+import type { ExportFormat, SavedRequest } from "../../lib/types";
+import { usePlugins } from "../plugins/hooks";
+import { exportFilename } from "./exportUtils";
 import { TagPicker } from "./TagPicker";
 
 const STREAMING_KIND_ICON = { sse: Radio, ws: Cable, grpc: Network } as const;
@@ -37,6 +42,9 @@ export function RequestRow({
   const [tagsOpen, setTagsOpen] = useState(false);
   const menuRef = useDismissable<HTMLDivElement>(() => setMenuOpen(false));
   const tagsRef = useDismissable<HTMLDivElement>(() => setTagsOpen(false));
+  const { data: allExportPlugins } = usePlugins(workspaceId, "export");
+  const exportPlugins = allExportPlugins?.filter((p) => p.enabled);
+  const exportable = request.kind === "http";
 
   function commitRename() {
     setEditing(false);
@@ -44,6 +52,34 @@ export function RequestRow({
     if (trimmed && trimmed !== request.name) onRename(trimmed);
     else setName(request.name);
   }
+
+  async function exportAs(format: ExportFormat) {
+    setMenuOpen(false);
+    const base = request.name.replace(/\s+/g, "_");
+    const path = await save({ defaultPath: exportFilename(format, base) });
+    if (!path) return;
+    try {
+      const content = await ipc.exportRequest(request.id, { format });
+      await ipc.writeFileBytes(path, textToBase64(content));
+    } catch (e) {
+      console.error("failed to export request:", e);
+    }
+  }
+
+  async function exportAsPlugin(pluginId: string) {
+    setMenuOpen(false);
+    const base = request.name.replace(/\s+/g, "_");
+    const path = await save({ defaultPath: `${base}.txt` });
+    if (!path) return;
+    try {
+      const content = await ipc.exportRequest(request.id, { pluginId });
+      await ipc.writeFileBytes(path, textToBase64(content));
+    } catch (e) {
+      console.error("failed to export request via plugin:", e);
+    }
+  }
+
+  const exportDisabledTitle = "Export supports HTTP requests only";
 
   return (
     <div
@@ -147,7 +183,7 @@ export function RequestRow({
         {menuOpen && (
           <div
             onClick={(e) => e.stopPropagation()}
-            className="absolute right-0 top-full z-10 mt-1 w-32 rounded-md border border-slate-200 bg-white py-1 text-xs shadow-lg dark:border-slate-700 dark:bg-slate-800"
+            className="absolute right-0 top-full z-10 mt-1 w-44 rounded-md border border-slate-200 bg-white py-1 text-xs shadow-lg dark:border-slate-700 dark:bg-slate-800"
           >
             <button
               type="button"
@@ -169,6 +205,54 @@ export function RequestRow({
             >
               <Copy size={12} /> Duplicate
             </button>
+            <button
+              type="button"
+              disabled={!exportable}
+              title={exportable ? undefined : exportDisabledTitle}
+              onClick={() => void exportAs("postman")}
+              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-700"
+            >
+              <Download size={12} /> Export to Postman…
+            </button>
+            <button
+              type="button"
+              disabled={!exportable}
+              title={exportable ? undefined : exportDisabledTitle}
+              onClick={() => void exportAs("open_api")}
+              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-700"
+            >
+              <Download size={12} /> Export to OpenAPI 3.0…
+            </button>
+            <button
+              type="button"
+              disabled={!exportable}
+              title={exportable ? undefined : exportDisabledTitle}
+              onClick={() => void exportAs("har")}
+              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-700"
+            >
+              <Download size={12} /> Export to HAR…
+            </button>
+            <button
+              type="button"
+              disabled={!exportable}
+              title={exportable ? undefined : exportDisabledTitle}
+              onClick={() => void exportAs("curl")}
+              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-700"
+            >
+              <Download size={12} /> Export to cURL…
+            </button>
+            {(exportPlugins ?? []).map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                disabled={!exportable}
+                title={exportable ? undefined : exportDisabledTitle}
+                onClick={() => void exportAsPlugin(p.id)}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-700"
+              >
+                <Download size={12} /> Export to {p.name}…
+              </button>
+            ))}
             <button
               type="button"
               onClick={() => {

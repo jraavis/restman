@@ -5,6 +5,7 @@
 //! yet since nothing produces local vars until then.
 
 use crate::error::AppResult;
+use crate::model::auth::AuthConfig;
 use crate::model::http::{HttpRequest, RequestBody};
 use crate::model::{VarScope, Variable, SECRET_MASK};
 use crate::store::{environments, variables};
@@ -149,6 +150,36 @@ pub fn interpolate_request(req: &mut HttpRequest, vars: &HashMap<String, String>
             if let Some(v) = variables {
                 *v = interpolate(v, vars);
             }
+        }
+    }
+}
+
+/// Apply `interpolate` across the text fields of a resolved `AuthConfig`.
+/// Runs *after* auth resolution/keychain hydration (which overwrites
+/// `req.auth`), so a `{{var}}` typed into an auth field reaches the wire
+/// resolved. `None` has nothing to interpolate; `OAuth2` is collapsed to
+/// `Bearer` before the engine sees it, so its exchanged token never needs it.
+pub fn interpolate_auth(auth: &mut AuthConfig, vars: &HashMap<String, String>) {
+    match auth {
+        AuthConfig::None | AuthConfig::OAuth2(_) => {}
+        AuthConfig::Bearer { token, prefix } => {
+            *token = interpolate(token, vars);
+            *prefix = interpolate(prefix, vars);
+        }
+        AuthConfig::Basic { username, password } => {
+            *username = interpolate(username, vars);
+            *password = interpolate(password, vars);
+        }
+        AuthConfig::ApiKey { key, value, location: _ } => {
+            *key = interpolate(key, vars);
+            *value = interpolate(value, vars);
+        }
+        AuthConfig::AwsSigV4(c) => {
+            c.access_key = interpolate(&c.access_key, vars);
+            c.secret_key = interpolate(&c.secret_key, vars);
+            c.region = interpolate(&c.region, vars);
+            c.service = interpolate(&c.service, vars);
+            c.session_token = interpolate(&c.session_token, vars);
         }
     }
 }
@@ -327,6 +358,20 @@ mod tests {
         .unwrap();
         let resolved = resolve(&conn, &ws.id, None).unwrap();
         assert!(resolved.secrets.contains("tok_abc123"));
+    }
+
+    #[test]
+    fn interpolate_auth_resolves_vars_and_leaves_unknown_literal() {
+        let mut vars = HashMap::new();
+        vars.insert("token".to_string(), "tok_abc123".to_string());
+
+        let mut auth = AuthConfig::Bearer { token: "{{token}}".into(), prefix: "{{scheme}}".into() };
+        interpolate_auth(&mut auth, &vars);
+        assert_eq!(auth, AuthConfig::Bearer { token: "tok_abc123".into(), prefix: "{{scheme}}".into() });
+
+        let mut auth = AuthConfig::Basic { username: "{{token}}".into(), password: "{{token}}".into() };
+        interpolate_auth(&mut auth, &vars);
+        assert_eq!(auth, AuthConfig::Basic { username: "tok_abc123".into(), password: "tok_abc123".into() });
     }
 
     #[test]

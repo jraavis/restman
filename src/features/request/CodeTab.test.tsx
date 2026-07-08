@@ -50,6 +50,7 @@ describe("CodeTab", () => {
       "ws-1",
       "col-1",
       "req-1",
+      { mode: "inherit" },
       { kind: "native", language: "curl" },
       { includeAuth: true, includeHeaders: true },
     ));
@@ -87,6 +88,7 @@ describe("CodeTab", () => {
       "ws-1",
       null,
       null,
+      { mode: "inherit" },
       { kind: "plugin", pluginId: "plug-1" },
       { includeAuth: true, includeHeaders: true },
     ));
@@ -129,6 +131,6 @@ describe("CodeTab", () => {
         requestId={null}
       />,
     );
-    expect(screen.getByText(/reflects the saved request/i)).toBeTruthy();
+    expect(screen.getByText(/reflects the Auth tab/i)).toBeTruthy();
   });
 });

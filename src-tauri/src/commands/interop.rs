@@ -1,7 +1,7 @@
 use crate::commands::plugins::require_kind;
 use crate::error::{AppError, AppResult};
 use crate::interop::restman::{FullImportPreview, FullImportReport};
-use crate::interop::{self, environment, restman, ConflictMode, ExportFormat, ImportFormat, ImportPreview, ImportReport, ImportedNode, EnvironmentImportReport, EnvironmentPreview};
+use crate::interop::{self, environment, restman, ConflictMode, ExportFormat, ImportFormat, ImportPlacement, ImportPreview, ImportReport, ImportedNode, EnvironmentImportReport, EnvironmentPreview};
 use crate::model::PluginKind;
 use crate::store::{self, AppState};
 use tauri::State;
@@ -52,9 +52,32 @@ pub fn apply_collection_import(
     parent_id: Option<String>,
     root: ImportedNode,
     mode: ConflictMode,
+    placement: ImportPlacement,
 ) -> AppResult<ImportReport> {
     let conn = state.db.lock().unwrap();
-    interop::apply_import(&conn, &workspace_id, parent_id.as_deref(), &root, mode)
+    interop::apply_import(&conn, &workspace_id, parent_id.as_deref(), &root, mode, placement)
+}
+
+/// Export a single saved request to `format`'s text representation, or to a
+/// plugin's format — same mutual-exclusivity convention as `export_collection`.
+#[tauri::command]
+pub fn export_request(
+    state: State<AppState>,
+    request_id: String,
+    format: Option<ExportFormat>,
+    plugin_id: Option<String>,
+) -> AppResult<String> {
+    let conn = state.db.lock().unwrap();
+    let node = interop::collect_request(&conn, &request_id)?;
+    match (format, plugin_id) {
+        (Some(f), None) => interop::export(f, &node),
+        (None, Some(id)) => {
+            let plugin = store::plugins::get(&conn, &id)?;
+            require_kind(&plugin, PluginKind::Export)?;
+            interop::plugin::export(&plugin.source, &node)
+        }
+        _ => Err(AppError::Other("export_request: specify exactly one of format or plugin_id".into())),
+    }
 }
 
 /// Export a collection (and everything nested under it) to `format`'s text

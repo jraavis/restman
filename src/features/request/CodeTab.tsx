@@ -1,8 +1,9 @@
 //! Live code-generation preview: pick a language, toggle auth/headers
 //! inclusion, copy or download the rendered snippet. Reuses the same
-//! `req`/`workspaceId`/`collectionId`/`requestId` shape `useSend` already
-//! sends to `send_request` — the backend resolves auth from the DB either
-//! way, so there's nothing extra to plumb in from the auth tab's local state.
+//! `req`/`workspaceId`/`collectionId`/`requestId` shape `useSend` sends to
+//! `send_request`, plus the Auth tab's live draft `RequestAuth` — the backend
+//! resolves it (inheritance + keychain hydration for masked fields) so the
+//! preview shows what the Auth tab currently says, saved or not.
 
 import { useState, type ReactNode } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -10,6 +11,7 @@ import { Copy, Download } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { LazyCodeEditor } from "../../components/LazyCodeEditor";
 import { Switch } from "../../components/Switch";
+import { useRequestStore } from "../../stores/requestStore";
 import { textToBase64 } from "../../lib/encoding";
 import { ipc } from "../../lib/ipc";
 import type { HttpRequest } from "../../lib/http";
@@ -51,12 +53,13 @@ export function CodeTab({
 }) {
   const [target, setTarget] = useState<CodegenTarget>({ kind: "native", language: "curl" });
   const [options, setOptions] = useState(defaultCodegenOptions());
+  const auth = useRequestStore((s) => s.auth);
   const { data: allPlugins } = usePlugins(workspaceId, "codegen");
   const plugins = allPlugins?.filter((p) => p.enabled);
 
   const { data: code, error } = useQuery({
-    queryKey: ["codegen", workspaceId, collectionId, requestId, target, options, request],
-    queryFn: () => ipc.generateCode(request, workspaceId as string, collectionId, requestId, target, options),
+    queryKey: ["codegen", workspaceId, collectionId, requestId, auth, target, options, request],
+    queryFn: () => ipc.generateCode(request, workspaceId as string, collectionId, requestId, auth, target, options),
     enabled: !!workspaceId && request.url.trim() !== "",
     placeholderData: (prev) => prev,
   });
@@ -124,7 +127,7 @@ export function CodeTab({
 
       {options.includeAuth && (
         <div className="-mt-1 px-3 pb-1.5 text-[11px] text-slate-400">
-          Auth reflects the saved request/collection config, not unsaved edits in the Auth tab.
+          Auth reflects the Auth tab's current config (secrets come from the keychain once saved).
         </div>
       )}
 

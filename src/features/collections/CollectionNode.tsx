@@ -29,6 +29,7 @@ import { textToBase64 } from "../../lib/encoding";
 import { defaultRequest } from "../../lib/http";
 import { ipc } from "../../lib/ipc";
 import { defaultRequestAuth, type Collection, type ExportFormat, type RequestKind } from "../../lib/types";
+import { exportFilename } from "./exportUtils";
 import { usePlugins } from "../plugins/hooks";
 import { CollectionAuthDialog } from "./CollectionAuthDialog";
 import { CollectionRunner } from "./CollectionRunner";
@@ -45,7 +46,7 @@ import {
 } from "./hooks";
 import { useOpenRequest } from "./useOpenRequest";
 import { childrenOf, isDescendant, type SortMode } from "./tree";
-import type { DragRef } from "./dragState";
+import { beginDrag, clearDrag, finishDrag, resolveDragItem, type DragRef } from "./dragState";
 import { RequestList } from "./RequestList";
 
 export function CollectionNode({
@@ -151,16 +152,15 @@ export function CollectionNode({
   }
 
   function handleDragStart(e: DragEvent) {
-    e.stopPropagation();
-    dragRef.current = { kind: "collection", id: collection.id, parentId: collection.parentId };
+    beginDrag(e, { kind: "collection", id: collection.id, parentId: collection.parentId }, dragRef);
   }
 
   async function exportAs(format: ExportFormat) {
-    const content = await ipc.exportCollection(collection.id, { format });
     const base = collection.name.replace(/\s+/g, "_");
     const path = await save({ defaultPath: exportFilename(format, base) });
     if (!path) return;
     try {
+      const content = await ipc.exportCollection(collection.id, { format });
       await ipc.writeFileBytes(path, textToBase64(content));
     } catch (e) {
       console.error("failed to export collection:", e);
@@ -168,11 +168,11 @@ export function CollectionNode({
   }
 
   async function exportAsPlugin(pluginId: string) {
-    const content = await ipc.exportCollection(collection.id, { pluginId });
     const base = collection.name.replace(/\s+/g, "_");
     const path = await save({ defaultPath: `${base}.txt` });
     if (!path) return;
     try {
+      const content = await ipc.exportCollection(collection.id, { pluginId });
       await ipc.writeFileBytes(path, textToBase64(content));
     } catch (e) {
       console.error("failed to export collection via plugin:", e);
@@ -186,12 +186,17 @@ export function CollectionNode({
   // but there's no reason to round-trip for a move the UI can already see is invalid.
   function handleDrop(e: DragEvent) {
     e.stopPropagation();
-    const drag = dragRef.current;
-    dragRef.current = null;
+    const drag = resolveDragItem(e, dragRef);
+    clearDrag(dragRef);
     if (!drag) return;
 
     if (drag.kind === "request") {
-      moveRequest.mutate({ id: drag.id, collectionId: collection.id });
+      if (drag.collectionId === collection.id) return;
+      moveRequest.mutate({
+        id: drag.id,
+        collectionId: collection.id,
+        fromCollectionId: drag.collectionId,
+      });
       return;
     }
     if (drag.id === collection.id) return;
@@ -215,6 +220,7 @@ export function CollectionNode({
         onClick={() => onToggleExpand(collection.id)}
         draggable={sortMode === "manual"}
         onDragStart={handleDragStart}
+        onDragEnd={(e) => finishDrag(dragRef, e)}
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
         style={indent}
@@ -419,7 +425,7 @@ export function CollectionNode({
       </div>
 
       {expanded && (
-        <div>
+        <div onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
           {children.map((child) => (
             <CollectionNode
               key={child.id}
@@ -462,7 +468,11 @@ export function CollectionNode({
         <ImportDialog
           workspaceId={workspaceId}
           parentId={collection.id}
+          parentName={collection.name}
           onClose={() => setImportOpen(false)}
+          onImported={() => {
+            if (!expanded) onToggleExpand(collection.id);
+          }}
         />
       )}
 
@@ -485,21 +495,4 @@ export function CollectionNode({
       )}
     </div>
   );
-}
-
-/** Filename for a collection-export artifact, per format. Kept here (next
- * to the only caller) rather than in `lib/` because there's no second
- * consumer yet — the codegen download in `CodeTab` already carries its own
- * per-language extension table. */
-function exportFilename(format: ExportFormat, baseName: string): string {
-  switch (format) {
-    case "postman":
-      return `${baseName}.postman_collection.json`;
-    case "open_api":
-      return `${baseName}.openapi.json`;
-    case "har":
-      return `${baseName}.har`;
-    case "curl":
-      return `${baseName}.sh`;
-  }
 }

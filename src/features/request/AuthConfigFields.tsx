@@ -87,9 +87,19 @@ export function AuthConfigFields({
 
   if (value.type === "bearer") {
     return (
-      <Field label="Token">
-        <SecretInput value={value.token} onChange={(token) => onChange({ ...value, token })} />
-      </Field>
+      <div className="flex flex-col gap-3">
+        <Field label="Prefix">
+          <input
+            className={inputClass}
+            placeholder="Bearer"
+            value={value.prefix ?? "Bearer"}
+            onChange={(e) => onChange({ ...value, prefix: e.target.value })}
+          />
+        </Field>
+        <Field label="Token">
+          <SecretInput value={value.token} onChange={(token) => onChange({ ...value, token })} />
+        </Field>
+      </div>
     );
   }
 

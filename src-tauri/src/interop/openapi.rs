@@ -467,7 +467,7 @@ fn resolve_security(security: &[Value], schemes: &Value, warnings: &mut Vec<Stri
 fn security_scheme_to_auth(name: &str, scheme: &Value, scopes: &[String], warnings: &mut Vec<String>) -> AuthConfig {
     match scheme.get("type").and_then(Value::as_str) {
         Some("http") => match scheme.get("scheme").and_then(Value::as_str) {
-            Some("bearer") => AuthConfig::Bearer { token: String::new() },
+            Some("bearer") => AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() },
             Some("basic") => AuthConfig::Basic { username: String::new(), password: String::new() },
             Some(other) => {
                 warnings.push(format!("security scheme \"{name}\": unsupported http scheme \"{other}\" — imported as No Auth"));
@@ -1083,7 +1083,7 @@ mod tests {
         let preview = parse(PETSTORE_FIXTURE).unwrap();
         assert_eq!(preview.root.name, "Petstore");
         assert_eq!(preview.root.description, Some("Sample pet store API".to_string()));
-        assert_eq!(preview.root.auth, AuthConfig::Bearer { token: String::new() });
+        assert_eq!(preview.root.auth, AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() });
 
         assert_eq!(preview.stats.requests, 6);
         assert_eq!(preview.stats.folders, 1);
@@ -1365,7 +1365,7 @@ mod tests {
     fn export_bakes_inherited_folder_auth_into_each_contained_operation() {
         let node = ImportedNode {
             name: "Demo".into(),
-            auth: AuthConfig::Bearer { token: String::new() },
+            auth: AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() },
             children: vec![ImportedNode {
                 name: "Admin".into(),
                 auth: AuthConfig::Basic { username: String::new(), password: String::new() },

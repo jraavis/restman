@@ -41,7 +41,7 @@ pub async fn start_oauth2_authorization(
     collection_id: Option<String>,
     request_id: Option<String>,
 ) -> AppResult<OAuth2Status> {
-    let (owner, hydrated) = resolve_owner_and_config(&state, collection_id.as_deref(), request_id.as_deref())?;
+    let (owner, hydrated) = resolve_owner_and_config(&state, collection_id.as_deref(), request_id.as_deref(), None)?;
     let cfg = match hydrated {
         AuthConfig::OAuth2(cfg) if cfg.grant_type == OAuth2GrantType::AuthorizationCode => cfg,
         AuthConfig::OAuth2(_) => {
@@ -87,7 +87,7 @@ pub async fn start_oauth2_authorization(
 /// `send_request` will silently refresh it on the next send regardless.
 #[tauri::command]
 pub fn get_oauth2_status(state: State<AppState>, collection_id: Option<String>, request_id: Option<String>) -> AppResult<Option<OAuth2Status>> {
-    let (owner, hydrated) = resolve_owner_and_config(&state, collection_id.as_deref(), request_id.as_deref())?;
+    let (owner, hydrated) = resolve_owner_and_config(&state, collection_id.as_deref(), request_id.as_deref(), None)?;
     if !matches!(hydrated, AuthConfig::OAuth2(_)) {
         return Ok(None);
     }
@@ -110,6 +110,7 @@ pub fn get_oauth_token_preview(
         &state,
         collection_id.as_deref(),
         request_id.as_deref(),
+        None,
     )?;
     if !matches!(hydrated, AuthConfig::OAuth2(_)) {
         return Ok(None);

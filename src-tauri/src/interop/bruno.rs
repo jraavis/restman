@@ -342,7 +342,7 @@ fn parse_auth_section(section: &str, warnings: &mut Vec<String>) -> AuthConfig {
     for line in section.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("bearer:") {
-            return AuthConfig::Bearer { token: rest.trim().to_string() };
+            return AuthConfig::Bearer { token: rest.trim().to_string(), prefix: crate::model::auth::default_bearer_prefix() };
         }
         if let Some(rest) = line.strip_prefix("basic:") {
             let (u, p) = rest.trim().split_once(':').map(|(u, p)| (u.to_string(), p.to_string())).unwrap_or((rest.trim().to_string(), String::new()));
@@ -461,7 +461,7 @@ post-response-script {
         assert!(req.headers.iter().any(|h| h.name == "Accept"));
         let x_debug = req.headers.iter().find(|h| h.name == "X-Debug").unwrap();
         assert!(!x_debug.enabled);
-        assert_eq!(req.auth, RequestAuth::Own(AuthConfig::Bearer { token: "tok123".into() }));
+        assert_eq!(req.auth, RequestAuth::Own(AuthConfig::Bearer { token: "tok123".into(), prefix: crate::model::auth::default_bearer_prefix() }));
         assert_eq!(req.body, RequestBody::Json("{\"name\":\"Fido\"}".into()));
         assert!(req.pre_request_script.contains("before"));
         assert!(req.post_response_script.contains("ok"));
@@ -616,7 +616,7 @@ body {
         std::fs::write(sub.join("Req.bru"), "meta {\n  name: Req\n}\nurl {\n  https://api.test/x\n}\n").unwrap();
 
         let preview = parse_directory(&root).unwrap();
-        assert_eq!(preview.root.auth, AuthConfig::Bearer { token: "root-tok".into() });
+        assert_eq!(preview.root.auth, AuthConfig::Bearer { token: "root-tok".into(), prefix: crate::model::auth::default_bearer_prefix() });
         assert_eq!(preview.root.children[0].auth, AuthConfig::Basic { username: "alice".into(), password: "secret".into() });
 
         std::fs::remove_dir_all(&root).unwrap();

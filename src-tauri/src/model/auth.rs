@@ -95,6 +95,10 @@ pub enum AuthConfig {
     Bearer {
         #[serde(default)]
         token: String,
+        /// Authorization scheme word before the token (`"Bearer"` unless the
+        /// API wants e.g. `"Token"` or `"JWT"`; empty sends the bare token).
+        #[serde(default = "default_bearer_prefix")]
+        prefix: String,
     },
     Basic {
         #[serde(default)]
@@ -116,6 +120,21 @@ pub enum AuthConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         AuthConfig::None
+    }
+}
+
+pub fn default_bearer_prefix() -> String {
+    "Bearer".into()
+}
+
+/// `"{prefix} {token}"`, or the bare token when the prefix is empty — the
+/// one place the Authorization value shape for bearer auth is defined, shared
+/// by the engine, codegen, and the curl exporter.
+pub fn bearer_header_value(prefix: &str, token: &str) -> String {
+    if prefix.is_empty() {
+        token.to_string()
+    } else {
+        format!("{prefix} {token}")
     }
 }
 
@@ -142,7 +161,7 @@ impl AuthConfig {
     pub fn secret_fields(&self) -> Vec<(&'static str, &str)> {
         match self {
             AuthConfig::None => vec![],
-            AuthConfig::Bearer { token } => vec![("bearer-token", token.as_str())],
+            AuthConfig::Bearer { token, .. } => vec![("bearer-token", token.as_str())],
             AuthConfig::Basic { password, .. } => vec![("basic-password", password.as_str())],
             AuthConfig::ApiKey { value, .. } => vec![("apikey-value", value.as_str())],
             AuthConfig::OAuth2(c) => vec![
@@ -160,7 +179,7 @@ impl AuthConfig {
     /// Replace this variant's secret fields in place, by slot name.
     fn set_secret_field(&mut self, slot: &str, value: String) {
         match self {
-            AuthConfig::Bearer { token } if slot == "bearer-token" => *token = value,
+            AuthConfig::Bearer { token, .. } if slot == "bearer-token" => *token = value,
             AuthConfig::Basic { password, .. } if slot == "basic-password" => *password = value,
             AuthConfig::ApiKey { value: v, .. } if slot == "apikey-value" => *v = value,
             AuthConfig::OAuth2(c) => match slot {
@@ -218,11 +237,26 @@ mod tests {
 
     #[test]
     fn bearer_round_trips_through_json() {
-        let cfg = AuthConfig::Bearer { token: "abc".into() };
+        let cfg = AuthConfig::Bearer { token: "abc".into(), prefix: crate::model::auth::default_bearer_prefix() };
         let json = serde_json::to_string(&cfg).unwrap();
-        assert_eq!(json, r#"{"type":"bearer","token":"abc"}"#);
+        assert_eq!(json, r#"{"type":"bearer","token":"abc","prefix":"Bearer"}"#);
         let back: AuthConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back, cfg);
+    }
+
+    /// Bearer configs stored before the `prefix` field existed deserialize
+    /// with the `"Bearer"` default rather than failing or going empty.
+    #[test]
+    fn bearer_without_prefix_defaults_on_deserialize() {
+        let back: AuthConfig = serde_json::from_str(r#"{"type":"bearer","token":"abc"}"#).unwrap();
+        assert_eq!(back, AuthConfig::Bearer { token: "abc".into(), prefix: "Bearer".into() });
+    }
+
+    #[test]
+    fn bearer_header_value_handles_custom_and_empty_prefix() {
+        assert_eq!(bearer_header_value("Bearer", "tok"), "Bearer tok");
+        assert_eq!(bearer_header_value("Token", "tok"), "Token tok");
+        assert_eq!(bearer_header_value("", "tok"), "tok");
     }
 
     /// Pins down the exact `"type"` tag string serde's snake_case rule
@@ -252,9 +286,9 @@ mod tests {
     /// shape is exactly what the frontend's discriminated union must match.
     #[test]
     fn request_auth_own_flattens_both_tags_into_one_object() {
-        let auth = RequestAuth::Own(AuthConfig::Bearer { token: "tok".into() });
+        let auth = RequestAuth::Own(AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() });
         let json = serde_json::to_string(&auth).unwrap();
-        assert_eq!(json, r#"{"mode":"own","type":"bearer","token":"tok"}"#);
+        assert_eq!(json, r#"{"mode":"own","type":"bearer","token":"tok","prefix":"Bearer"}"#);
         assert_eq!(serde_json::from_str::<RequestAuth>(&json).unwrap(), auth);
 
         assert_eq!(serde_json::to_string(&RequestAuth::Inherit).unwrap(), r#"{"mode":"inherit"}"#);
@@ -262,18 +296,18 @@ mod tests {
 
     #[test]
     fn with_secret_field_only_touches_matching_variant() {
-        let cfg = AuthConfig::Bearer { token: String::new() }.with_secret_field("bearer-token", "tok".into());
-        assert_eq!(cfg, AuthConfig::Bearer { token: "tok".into() });
+        let cfg = AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() }.with_secret_field("bearer-token", "tok".into());
+        assert_eq!(cfg, AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() });
 
         // Wrong slot for this variant is a no-op, not a panic.
-        let cfg = AuthConfig::Bearer { token: "tok".into() }.with_secret_field("aws-secret-key", "nope".into());
-        assert_eq!(cfg, AuthConfig::Bearer { token: "tok".into() });
+        let cfg = AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() }.with_secret_field("aws-secret-key", "nope".into());
+        assert_eq!(cfg, AuthConfig::Bearer { token: "tok".into(), prefix: crate::model::auth::default_bearer_prefix() });
     }
 
     #[test]
     fn is_masked_true_for_empty_and_mask_false_for_real_value() {
-        assert!(AuthConfig::Bearer { token: String::new() }.is_masked());
-        assert!(AuthConfig::Bearer { token: SECRET_MASK.into() }.is_masked());
-        assert!(!AuthConfig::Bearer { token: "real".into() }.is_masked());
+        assert!(AuthConfig::Bearer { token: String::new(), prefix: crate::model::auth::default_bearer_prefix() }.is_masked());
+        assert!(AuthConfig::Bearer { token: SECRET_MASK.into(), prefix: crate::model::auth::default_bearer_prefix() }.is_masked());
+        assert!(!AuthConfig::Bearer { token: "real".into(), prefix: crate::model::auth::default_bearer_prefix() }.is_masked());
     }
 }

@@ -117,7 +117,7 @@ pub(crate) enum AuthPlan {
 pub(crate) fn plan_auth(auth: &AuthConfig) -> AppResult<AuthPlan> {
     Ok(match auth {
         AuthConfig::None => AuthPlan::None,
-        AuthConfig::Bearer { token } => AuthPlan::Header("Authorization".into(), format!("Bearer {token}")),
+        AuthConfig::Bearer { token, prefix } => AuthPlan::Header("Authorization".into(), crate::model::auth::bearer_header_value(prefix, token)),
         AuthConfig::Basic { username, password } => {
             let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, format!("{username}:{password}"));
             AuthPlan::Header("Authorization".into(), format!("Basic {encoded}"))
@@ -311,7 +311,7 @@ pub(crate) fn sample_get_request() -> HttpRequest {
             enabled: true,
         }],
         query: vec![crate::model::http::KeyValue { key: "limit".into(), value: "5".into(), enabled: true }],
-        auth: AuthConfig::Bearer { token: "tok123".into() },
+        auth: AuthConfig::Bearer { token: "tok123".into(), prefix: crate::model::auth::default_bearer_prefix() },
         ..Default::default()
     }
 }

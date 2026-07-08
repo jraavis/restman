@@ -251,7 +251,7 @@ fn parse_auth(v: Option<&Value>, warnings: &mut Vec<String>) -> AuthConfig {
     }
     match a.get("type").and_then(Value::as_str).unwrap_or("none") {
         "none" | "" => AuthConfig::None,
-        "bearer" => AuthConfig::Bearer { token: a.get("token").and_then(Value::as_str).unwrap_or_default().to_string() },
+        "bearer" => AuthConfig::Bearer { token: a.get("token").and_then(Value::as_str).unwrap_or_default().to_string(), prefix: crate::model::auth::default_bearer_prefix() },
         "basic" => AuthConfig::Basic {
             username: a.get("username").and_then(Value::as_str).unwrap_or_default().to_string(),
             password: a.get("password").and_then(Value::as_str).unwrap_or_default().to_string(),
@@ -354,7 +354,7 @@ mod tests {
         let preview = parse(INSOMNIA_FIXTURE).unwrap();
         assert_eq!(preview.root.name, "Petstore");
         assert_eq!(preview.root.description, Some("Sample API".to_string()));
-        assert_eq!(preview.root.auth, AuthConfig::Bearer { token: "ws-bearer-token".into() });
+        assert_eq!(preview.root.auth, AuthConfig::Bearer { token: "ws-bearer-token".into(), prefix: crate::model::auth::default_bearer_prefix() });
         assert_eq!(preview.root.children.len(), 1);
         assert_eq!(preview.root.children[0].name, "Pets");
         assert_eq!(preview.root.requests.len(), 2);

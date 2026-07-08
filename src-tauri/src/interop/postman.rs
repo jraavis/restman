@@ -289,7 +289,7 @@ fn parse_auth(a: &Value, warnings: &mut Vec<String>) -> AuthConfig {
     let ty = a.get("type").and_then(Value::as_str).unwrap_or("noauth");
     match ty {
         "noauth" => AuthConfig::None,
-        "bearer" => AuthConfig::Bearer { token: auth_param(a, "bearer", "token") },
+        "bearer" => AuthConfig::Bearer { token: auth_param(a, "bearer", "token"), prefix: crate::model::auth::default_bearer_prefix() },
         "basic" => {
             AuthConfig::Basic { username: auth_param(a, "basic", "username"), password: auth_param(a, "basic", "password") }
         }
@@ -523,7 +523,9 @@ fn grant_type_str(g: OAuth2GrantType) -> &'static str {
 fn auth_to_json(cfg: &AuthConfig) -> Value {
     match cfg {
         AuthConfig::None => json!({"type": "noauth"}),
-        AuthConfig::Bearer { token } => json!({"type": "bearer", "bearer": [param("token", token)]}),
+        // Postman's bearer block has no prefix concept — a custom prefix is
+        // dropped on export (token still carries).
+        AuthConfig::Bearer { token, .. } => json!({"type": "bearer", "bearer": [param("token", token)]}),
         AuthConfig::Basic { username, password } => {
             json!({"type": "basic", "basic": [param("username", username), param("password", password)]})
         }
@@ -679,7 +681,7 @@ mod tests {
     fn imports_realistic_postman_fixture_with_expected_shape_and_warnings() {
         let preview = parse(PETSTORE_FIXTURE).unwrap();
         assert_eq!(preview.root.name, "Petstore");
-        assert_eq!(preview.root.auth, AuthConfig::Bearer { token: "collection-level-token".into() });
+        assert_eq!(preview.root.auth, AuthConfig::Bearer { token: "collection-level-token".into(), prefix: crate::model::auth::default_bearer_prefix() });
         assert_eq!(preview.root.children.len(), 1);
         assert_eq!(preview.root.requests.len(), 4);
 

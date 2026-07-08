@@ -10,7 +10,7 @@ use crate::codegen::{self, CodegenOptions, CodegenTarget, OAUTH2_TOKEN_PLACEHOLD
 use crate::commands::http::resolve_owner_and_config;
 use crate::commands::plugins::require_kind;
 use crate::error::AppResult;
-use crate::model::auth::AuthConfig;
+use crate::model::auth::{AuthConfig, RequestAuth};
 use crate::model::http::HttpRequest;
 use crate::model::PluginKind;
 use crate::store::{self, AppState};
@@ -23,6 +23,7 @@ pub fn generate_code(
     workspace_id: String,
     collection_id: Option<String>,
     request_id: Option<String>,
+    draft_auth: Option<RequestAuth>,
     target: CodegenTarget,
     options: CodegenOptions,
 ) -> AppResult<String> {
@@ -32,7 +33,7 @@ pub fn generate_code(
     };
     crate::vars::interpolate_request(&mut req, &resolved.values);
 
-    let (owner, hydrated) = resolve_owner_and_config(&state, collection_id.as_deref(), request_id.as_deref())?;
+    let (owner, hydrated) = resolve_owner_and_config(&state, collection_id.as_deref(), request_id.as_deref(), draft_auth)?;
     req.auth = match hydrated {
         AuthConfig::OAuth2(_) => {
             let conn = state.db.lock().unwrap();
@@ -41,10 +42,11 @@ pub fn generate_code(
                 Some(t) if token_store::is_fresh(&t) => t.access_token,
                 _ => OAUTH2_TOKEN_PLACEHOLDER.to_string(),
             };
-            AuthConfig::Bearer { token }
+            AuthConfig::Bearer { token, prefix: crate::model::auth::default_bearer_prefix() }
         }
         other => other,
     };
+    crate::vars::interpolate_auth(&mut req.auth, &resolved.values);
 
     match target {
         CodegenTarget::Native { language } => codegen::generate(language, &req, &options),

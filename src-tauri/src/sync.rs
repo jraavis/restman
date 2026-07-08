@@ -241,7 +241,7 @@ pub fn import_from_folder(
 
     for (ext, content) in read_dir_entries(&folder.join("collections"))? {
         let node: ImportedNode = deserialize(&content, &ext)?;
-        let sub_report = interop::apply_import(conn, workspace_id, None, &node, mode)?;
+        let sub_report = interop::apply_import(conn, workspace_id, None, &node, mode, interop::ImportPlacement::AsSubfolder)?;
         report.collections_imported += 1;
         report.warnings.extend(sub_report.warnings);
     }
@@ -287,7 +287,7 @@ mod tests {
 
     fn seed_collection(conn: &Connection, workspace_id: &str) -> String {
         let c = crate::store::collections::create(conn, workspace_id, None, "My Collection", None).unwrap();
-        crate::store::collections::update_auth(conn, &c.id, AuthConfig::Bearer { token: "tok-real".into() }).unwrap();
+        crate::store::collections::update_auth(conn, &c.id, AuthConfig::Bearer { token: "tok-real".into(), prefix: crate::model::auth::default_bearer_prefix() }).unwrap();
         let input = crate::model::SavedRequestInput {
             name: "Get thing".into(),
             method: "GET".into(),
